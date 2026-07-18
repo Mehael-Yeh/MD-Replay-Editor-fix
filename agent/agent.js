@@ -138,6 +138,7 @@ function findAndHook(cls, methodName, paramCount, onEnter) {
     if (method.isNull()) { log("Method not found: " + methodName); return false; }
     return hookMethod(method, onEnter);
 }
+function main() {
     try {
         initIl2Cpp();
     } catch (e) {
