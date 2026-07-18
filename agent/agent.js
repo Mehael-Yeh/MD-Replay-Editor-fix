@@ -38,6 +38,7 @@ function initIl2Cpp() {
     const propGetName = Module.findExportByName('GameAssembly.dll', 'il2cpp_property_get_name');
     const propGetGet = Module.findExportByName('GameAssembly.dll', 'il2cpp_property_get_get_method');
     const runtimeInvoke = Module.findExportByName('GameAssembly.dll', 'il2cpp_runtime_invoke');
+    const methodGetPtr = Module.findExportByName("GameAssembly.dll", "il2cpp_method_get_pointer");
     const methodGetParamCount = Module.findExportByName('GameAssembly.dll', 'il2cpp_method_get_param_count');
     const fieldGetValue = Module.findExportByName('GameAssembly.dll', 'il2cpp_field_get_value_object');
     const stringNew = Module.findExportByName('GameAssembly.dll', 'il2cpp_string_new');
@@ -66,6 +67,7 @@ function initIl2Cpp() {
         propGetName: new NativeFunction(propGetName, 'pointer', ['pointer']),
         propGetGet: new NativeFunction(propGetGet, 'pointer', ['pointer']),
         runtimeInvoke: new NativeFunction(runtimeInvoke, 'pointer', ['pointer', 'pointer', 'pointer', 'pointer']),
+        methodGetPtr: new NativeFunction(methodGetPtr, "pointer", ["pointer"]),
         stringNew: new NativeFunction(stringNew, 'pointer', ['pointer']),
         objectNew: new NativeFunction(objectNew, 'pointer', ['pointer']),
     };
@@ -119,31 +121,23 @@ function findField(cls, fieldName) {
     return NULL;
 }
 
-function hookMethod(cls, methodName, paramCount, onEnter) {
-    const method = findMethod(cls, methodName, paramCount);
-    if (method.isNull()) {
-        log('Method not found: ' + methodName);
-        return false;
-    }
-    // Get the function pointer from the method
-    const methodPtr = method;
-    // Hook via Frida's Interceptor
-    Interceptor.attach(methodPtr, {
-        onEnter(args) {
-            try {
-                onEnter(args);
-            } catch (e) {
-                log('Hook error: ' + e.message);
-            }
+function hookMethod(method, onEnter) {
+    if (method.isNull()) return false;
+    var fnPtr = api.methodGetPtr(method);
+    if (fnPtr.isNull()) { log("No code ptr for method"); return false; }
+    Interceptor.attach(fnPtr, {
+        onEnter: function(args) {
+            try { onEnter(args); } catch (e) { log("Hook error: " + e.message); }
         }
     });
-    log('Hooked: ' + methodName);
     return true;
 }
 
-// ── Main ────────────────────────────────────────────────
-
-function main() {
+function findAndHook(cls, methodName, paramCount, onEnter) {
+    var method = findMethod(cls, methodName, paramCount);
+    if (method.isNull()) { log("Method not found: " + methodName); return false; }
+    return hookMethod(method, onEnter);
+}
     try {
         initIl2Cpp();
     } catch (e) {
@@ -237,83 +231,65 @@ function main() {
         }
 
         // Hook Request.Entry
-        Interceptor.attach(entryMethod, {
-            onEnter(args) {
-                try {
-                    const cmd = readCStr(args[0]);
-                    if (cmd) {
-                        if (cmd === 'Duel.begin' || cmd === 'Duel.end' || cmd === 'User.replay_list') {
-                            send({ type: 'network_request', data: cmd });
-                        }
-                    }
-                } catch (e) {}
+        findAndHook(requestClass, "Entry", 3, function(args) {
+            var cmd = readCStr(args[0]);
+            if (cmd) {
+                if (cmd === "Duel.begin" || cmd === "Duel.end" || cmd === "User.replay_list") {
+                    send({ type: "network_request", data: cmd });
+                }
             }
         });
 
         // Hook Request.CommandEvent for response interception
         const isCompletedField = findField(handleClass, 'IsCompleted') || findField(handleClass, 'm_IsCompleted');
-        Interceptor.attach(cmdEventMethod, {
-            onEnter(args) {
-                try {
-                    // args[0] = command (string), args[1] = handle
-                    const handle = args[1];
-                    if (handle.isNull()) return;
+        findAndHook(requestClass, "CommandEvent", 2, function(args) {
+            try {
+                var handle = args[1];
+                if (handle.isNull()) return;
+                var requestPtr = api.fieldGetValue(fieldRequest, handle);
+                if (requestPtr.isNull()) return;
+                var cmdResult = invokeStaticMethod(getCommandMethod, [requestPtr]);
+                var cmd = cmdResult.isNull() ? "" : readCStr(cmdResult);
+                if (!cmd) return;
 
-                    // Read the Request structure from the handle
-                    const requestPtr = api.fieldGetValue(fieldRequest, handle);
-                    if (requestPtr.isNull()) return;
-
-                    // Get command name
-                    const cmdResult = invokeStaticMethod(getCommandMethod, [requestPtr]);
-                    const cmd = cmdResult.isNull() ? '' : readCStr(cmdResult);
-                    if (!cmd) return;
-
-                    if (cmd === 'Duel.end') {
-                        // Read ClientWork "Duel" data
-                        const jsonResult = getClientWorkJson('Duel');
-                        if (jsonResult && !jsonResult.isNull()) {
-                            const jsonStr = readCStr(jsonResult);
-                            if (jsonStr) {
-                                try {
-                                    const data = JSON.parse(jsonStr);
-                                    const gm = data.GameMode || 0;
-                                    if (gm === REPLAY_MODE || gm === SOLO_MODE) {
-                                        const did = data.did || Date.now();
-                                        const fileName = did + '_' + Date.now() + '.json';
-                                        send({
-                                            type: 'save_replay',
-                                            data: { fileName, content: jsonStr, gameMode: gm, did }
-                                        });
-                                        log('Auto-save: ' + fileName);
-                                    }
-                                } catch (e) {}
-                            }
-                        }
-                    } else if (cmd === 'User.replay_list') {
-                        // Bypass limit: read ReplayInfo, modify max
-                        const infoResult = getClientWorkJson('ReplayInfo');
-                        if (infoResult && !infoResult.isNull()) {
+                if (cmd === "Duel.end") {
+                    var jsonResult = getClientWorkJson("Duel");
+                    if (jsonResult && !jsonResult.isNull()) {
+                        var jsonStr = readCStr(jsonResult);
+                        if (jsonStr) {
                             try {
-                                const info = JSON.parse(readCStr(infoResult));
-                                if (info && info.max !== undefined) {
-                                    const oldMax = info.max;
-                                    info.max = 99999;
-                                    const newJson = JSON.stringify(info);
-                                    // Use updateJson to write it back
-                                    const pathStr = api.stringNew(Memory.allocUtf8String('ReplayInfo'));
-                                    const valStr = api.stringNew(Memory.allocUtf8String(newJson));
-                                    invokeStaticMethod(updateJson, [pathStr, valStr]);
-                                    if (oldMax !== 99999) {
-                                        log('Limit bypassed: ' + oldMax + ' -> 99999');
-                                        send({ type: 'limit_bypassed', data: { oldMax } });
-                                    }
+                                var data = JSON.parse(jsonStr);
+                                var gm = data.GameMode || 0;
+                                if (gm === REPLAY_MODE || gm === SOLO_MODE) {
+                                    var did = data.did || Date.now();
+                                    var fileName = did + "_" + Date.now() + ".json";
+                                    send({ type: "save_replay", data: { fileName: fileName, content: jsonStr, gameMode: gm, did: did } });
+                                    log("Auto-save: " + fileName);
                                 }
                             } catch (e) {}
                         }
                     }
-                } catch (e) {
-                    log('CommandEvent error: ' + e.message);
+                } else if (cmd === "User.replay_list") {
+                    var infoResult = getClientWorkJson("ReplayInfo");
+                    if (infoResult && !infoResult.isNull()) {
+                        try {
+                            var info = JSON.parse(readCStr(infoResult));
+                            if (info && info.max !== undefined) {
+                                var oldMax = info.max;
+                                info.max = 99999;
+                                var pathStr = api.stringNew(Memory.allocUtf8String("ReplayInfo"));
+                                var valStr = api.stringNew(Memory.allocUtf8String(JSON.stringify(info)));
+                                invokeStaticMethod(updateJson, [pathStr, valStr]);
+                                if (oldMax !== 99999) {
+                                    log("Limit bypassed: " + oldMax + " -> 99999");
+                                    send({ type: "limit_bypassed", data: { oldMax: oldMax } });
+                                }
+                            }
+                        } catch (e) {}
+                    }
                 }
+            } catch (e) {
+                log("CommandEvent error: " + e.message);
             }
         });
 
