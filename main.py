@@ -21,7 +21,7 @@ from typing import Callable, Optional
 
 
 APP_NAME = "MD-Replay-Editor-fix"
-APP_VERSION = "v2.7.0_R2"
+APP_VERSION = "v2.7.0_R3"
 SUPPORTED_GAME_VERSION = "2.7.0"
 GITHUB_URL = "https://github.com/Mehael-Yeh/MD-Replay-Editor-fix"
 GITHUB_ISSUES_URL = f"{GITHUB_URL}/issues/new"
@@ -78,17 +78,53 @@ class ReplayStore:
     def read(self, path: Path) -> str:
         return validate_replay_hex(path.read_text(encoding="ascii"))
 
-    def delete(self, path: Path) -> None:
+    def _checked_path(self, path: Path) -> Path:
         directory = self.directory.resolve()
         target = path.resolve()
         if target.parent != directory or target.suffix.lower() != ".replay":
-            raise ValueError("只能删除回放保存目录中的 .replay 文件")
-        target.unlink()
+            raise ValueError("只能管理回放保存目录中的 .replay 文件")
+        return target
+
+    def delete(self, path: Path) -> None:
+        self._checked_path(path).unlink()
+
+    def rename(self, path: Path, new_name: str) -> Path:
+        source = self._checked_path(path)
+        name = new_name.strip()
+        if name.lower().endswith(".replay"):
+            name = name[:-7].rstrip()
+        if not name:
+            raise ValueError("请输入新的回放名称")
+        if any(ord(char) < 32 or char in '<>:"/\\|?*' for char in name):
+            raise ValueError('名称不能包含以下字符：< > : " / \\ | ? *')
+        if name.endswith((".", " ")):
+            raise ValueError("名称不能以句点或空格结尾")
+        reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+        if name.upper() in reserved:
+            raise ValueError("这个名称由 Windows 系统保留，请换一个名称")
+
+        target = self.directory / f"{name}.replay"
+        if target == source:
+            return source
+        if target.exists():
+            raise FileExistsError(f"已经存在名为“{target.name}”的回放")
+        source.rename(target)
+        return target
 
     def save(self, replay_hex: str) -> SavedReplay:
         replay_hex = validate_replay_hex(replay_hex)
         digest = hashlib.sha256(bytes.fromhex(replay_hex)).hexdigest()[:12]
         existing = next(self.directory.glob(f"*_{digest}.replay"), None)
+        if existing is None:
+            for candidate in self.directory.glob("*.replay"):
+                try:
+                    candidate_hex = self.read(candidate)
+                    candidate_digest = hashlib.sha256(bytes.fromhex(candidate_hex)).hexdigest()[:12]
+                    if candidate_digest == digest:
+                        existing = candidate
+                        break
+                except (OSError, ValueError):
+                    continue
         if existing:
             return SavedReplay(existing, False)
 
@@ -268,10 +304,16 @@ class ReplayManager:
             self.override_armed = True
         self.emit("armed", path)
 
-    def cancel_override(self) -> None:
+    def cancel_override(self, notify: bool = True) -> None:
         with self._lock:
             self.override_armed = False
-        self.emit("cancelled")
+        if notify:
+            self.emit("cancelled")
+
+    def replace_selected_path(self, old_path: Path, new_path: Path) -> None:
+        with self._lock:
+            if self.selected == old_path:
+                self.selected = new_path
 
     def detach(self) -> None:
         with self._lock:
@@ -301,6 +343,9 @@ class ReplayApp:
     BLUE_HOVER = "#1765CC"
     GREEN = "#188038"
     RED = "#D93025"
+    DANGER_BG = "#FCE8E6"
+    DANGER_HOVER = "#F9DEDC"
+    DANGER_TEXT = "#B3261E"
     AMBER = "#F9AB00"
 
     def __init__(self, data_dir: Path):
@@ -473,7 +518,7 @@ class ReplayApp:
         self.attach_button.pack(side=tk.LEFT)
         self.play_button = self._button(
             action_bar,
-            "2. 用所选文件在游戏里回放",
+            "2. 游戏内回放",
             self.arm_selected,
         )
         self.play_button.pack(side=tk.LEFT, padx=(10, 0))
@@ -536,9 +581,17 @@ class ReplayApp:
             borderwidth=1,
             font=("Microsoft YaHei UI", 9),
         )
-        self.replay_menu.add_command(label="下一条播放这条回放", command=self.arm_selected)
+        self.replay_menu.add_command(label="下一条播放", command=self.arm_selected)
+        self.replay_menu.add_command(label="重命名", command=self.rename_selected)
         self.replay_menu.add_separator()
-        self.replay_menu.add_command(label="删除这条回放", command=self.delete_selected)
+        self.replay_menu.add_command(label="删除", command=self.delete_selected)
+        self.replay_menu.entryconfigure(
+            3,
+            background=self.DANGER_BG,
+            foreground=self.DANGER_TEXT,
+            activebackground=self.DANGER_HOVER,
+            activeforeground=self.DANGER_TEXT,
+        )
 
         tip = tk.Label(
             library_card,
@@ -573,10 +626,12 @@ class ReplayApp:
             highlightthickness=1,
         )
 
-    def _button(self, parent, text: str, command, primary: bool = False):
+    def _button(self, parent, text: str, command, primary: bool = False, danger: bool = False):
         bg = self.BLUE if primary else self.CARD
         fg = "#FFFFFF" if primary else self.BLUE
         hover = self.BLUE_HOVER if primary else "#E8F0FE"
+        if danger:
+            bg, fg, hover = self.DANGER_BG, self.DANGER_TEXT, self.DANGER_HOVER
         button = self.tk.Button(
             parent,
             text=text,
@@ -593,9 +648,28 @@ class ReplayApp:
             cursor="hand2",
             font=("Microsoft YaHei UI", 9, "bold"),
         )
-        button.bind("<Enter>", lambda _event: button.configure(bg=hover) if button["state"] == self.tk.NORMAL else None)
-        button.bind("<Leave>", lambda _event: button.configure(bg=bg) if button["state"] == self.tk.NORMAL else None)
+        button._normal_bg = bg
+        button._hover_bg = hover
+        button._normal_fg = fg
+        button.bind(
+            "<Enter>",
+            lambda _event: button.configure(bg=button._hover_bg) if button["state"] == self.tk.NORMAL else None,
+        )
+        button.bind(
+            "<Leave>",
+            lambda _event: button.configure(bg=button._normal_bg) if button["state"] == self.tk.NORMAL else None,
+        )
         return button
+
+    def _set_button_tone(self, button, danger: bool = False) -> None:
+        if danger:
+            bg, fg, hover = self.DANGER_BG, self.DANGER_TEXT, self.DANGER_HOVER
+        else:
+            bg, fg, hover = self.CARD, self.BLUE, "#E8F0FE"
+        button._normal_bg = bg
+        button._hover_bg = hover
+        button._normal_fg = fg
+        button.configure(bg=bg, fg=fg, activebackground=hover, activeforeground=fg)
 
     def _link_button(self, parent, text: str, command):
         button = self.tk.Button(
@@ -725,8 +799,9 @@ class ReplayApp:
         self.tk.Label(
             replay_card,
             text=(
-                "在主界面选中一条回放，双击它或右键选择“下一条播放这条回放”。"
+                "在主界面选中一条回放，双击它或右键选择“下一条播放”。"
                 "随后回到游戏，播放任意一条当前可用的官方回放；程序只替换这一次播放。"
+                "如果临时不想播放，点击主界面的“取消回放”即可。"
             ),
             bg=self.CARD,
             fg=self.MUTED,
@@ -883,8 +958,22 @@ class ReplayApp:
             self.log_text.configure(state=self.tk.DISABLED)
 
     def update_action_states(self) -> None:
+        if self.manager.override_armed:
+            self._set_button_tone(self.play_button, danger=True)
+            self.play_button.configure(
+                state=self.tk.NORMAL,
+                text="取消回放",
+                command=self.cancel_playback,
+            )
+            return
+
+        self._set_button_tone(self.play_button)
         has_selection = self.selected_path() is not None
-        self.play_button.configure(state=self.tk.NORMAL if has_selection else self.tk.DISABLED)
+        self.play_button.configure(
+            state=self.tk.NORMAL if has_selection else self.tk.DISABLED,
+            text="2. 游戏内回放",
+            command=self.arm_selected,
+        )
 
     def start_attach(self) -> None:
         if self.manager.attached:
@@ -925,9 +1014,50 @@ class ReplayApp:
             return
         try:
             self.manager.arm_override(path)
+            self.update_action_states()
         except Exception as exc:
             self.set_status("准备本地回放失败", str(exc), self.RED)
             self.append_log(str(exc))
+
+    def cancel_playback(self) -> None:
+        if not self.manager.override_armed:
+            self.update_action_states()
+            return
+        self.manager.cancel_override()
+        self.update_action_states()
+
+    def rename_selected(self) -> None:
+        from tkinter import simpledialog
+
+        path = self.selected_path()
+        if path is None:
+            self.set_status("还没有选择文件", "请先在列表中选择要重命名的回放。", self.AMBER)
+            return
+        new_name = simpledialog.askstring(
+            "重命名回放",
+            "输入新的回放名称：",
+            initialvalue=path.stem,
+            parent=self.root,
+        )
+        if new_name is None:
+            return
+        try:
+            new_path = self.store.rename(path, new_name)
+            self.manager.replace_selected_path(path, new_path)
+            self.refresh()
+            if self.tree.exists(str(new_path)):
+                self.tree.selection_set(str(new_path))
+                self.tree.focus(str(new_path))
+                self.tree.see(str(new_path))
+            self.update_action_states()
+            self.set_status("重命名成功", f"新的名称是 {new_path.name}", self.GREEN)
+            self.append_log(f"已将 {path.name} 重命名为 {new_path.name}")
+        except FileNotFoundError:
+            self.set_status("文件已经不存在", "列表已自动刷新。", self.AMBER)
+            self.refresh()
+        except Exception as exc:
+            self.set_status("重命名失败", str(exc), self.RED)
+            self.append_log(f"重命名失败：{exc}")
 
     def delete_selected(self) -> None:
         from tkinter import messagebox
@@ -946,7 +1076,7 @@ class ReplayApp:
             return
         try:
             if self.manager.override_armed and self.manager.selected == path:
-                self.manager.cancel_override()
+                self.manager.cancel_override(notify=False)
             self.store.delete(path)
             self.set_status("回放已删除", f"{path.name} 已从本地删除。", self.GREEN)
             self.append_log(f"已删除 {path.name}")
@@ -1026,13 +1156,20 @@ class ReplayApp:
                 elif kind == "armed":
                     self.set_status("本地回放已经准备好", "现在回到游戏，播放任意一条可用回放。", self.BLUE)
                     self.append_log(f"下一次播放将使用 {Path(data).name}")
+                    self.update_action_states()
+                elif kind == "cancelled":
+                    self.set_status("已取消回放", "不会再替换下一条游戏回放，自动保存仍在运行。", self.GREEN)
+                    self.append_log("已取消准备好的本地回放")
+                    self.update_action_states()
                 elif kind == "loaded":
                     self.set_status("本地回放已送入游戏", "本次播放已替换；程序现在自动恢复保存模式。", self.GREEN)
                     self.append_log(f"已加载 {Path(data).name}")
+                    self.update_action_states()
                 elif kind == "detached":
                     self.set_status("游戏连接已断开", "如果游戏仍在运行，请点击按钮重新连接。", self.AMBER)
                     self.attach_button.configure(state=self.tk.NORMAL, text="1. 重新连接游戏")
                     self.append_log(f"连接断开：{data}")
+                    self.update_action_states()
                 elif kind == "error":
                     self.set_status("连接或运行失败", str(data), self.RED)
                     self.attach_button.configure(state=self.tk.NORMAL, text="1. 重试连接")

@@ -55,6 +55,26 @@ class ReplayStoreTests(unittest.TestCase):
                 store.delete(outside)
             self.assertTrue(outside.exists())
 
+    def test_rename_uses_friendly_name_and_keeps_deduplication(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ReplayStore(Path(tmp))
+            replay = store.save(VALID).path
+            renamed = store.rename(replay, "我的决斗.replay")
+            self.assertEqual(renamed.name, "我的决斗.replay")
+            self.assertTrue(renamed.exists())
+            self.assertFalse(store.save(VALID).created)
+            self.assertEqual(store.save(VALID).path, renamed)
+
+    def test_rename_rejects_invalid_or_duplicate_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ReplayStore(Path(tmp))
+            replay = store.save(VALID).path
+            (Path(tmp) / "已有名称.replay").write_text((b"\x02replaym-other").hex(), encoding="ascii")
+            for name in ("", "bad/name", "CON", "已有名称"):
+                with self.subTest(name=name):
+                    with self.assertRaises((ValueError, FileExistsError)):
+                        store.rename(replay, name)
+
 
 class FakeScript:
     def __init__(self):
@@ -73,7 +93,7 @@ class ReplayManagerTests(unittest.TestCase):
                     "type": "send",
                     "payload": {
                         "type": "ready",
-                        "data": {"version": "v2.7.0_R2", "gameVersion": "2.7.0"},
+                        "data": {"version": "v2.7.0_R3", "gameVersion": "2.7.0"},
                     },
                 },
                 None,
@@ -123,6 +143,18 @@ class ReplayManagerTests(unittest.TestCase):
             self.assertFalse(manager.override_armed)
             self.assertEqual(len(store.list()), 1)
             self.assertEqual(events[-1], ("loaded", selected))
+
+    def test_armed_override_can_be_cancelled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            events = []
+            store = ReplayStore(Path(tmp))
+            selected = store.save(VALID).path
+            manager = ReplayManager(store, lambda kind, data=None: events.append((kind, data)))
+            manager.attached = True
+            manager.arm_override(selected)
+            manager.cancel_override()
+            self.assertFalse(manager.override_armed)
+            self.assertEqual(events[-1], ("cancelled", None))
 
 
 if __name__ == "__main__":

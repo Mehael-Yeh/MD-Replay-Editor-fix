@@ -1,7 +1,7 @@
 import "frida-il2cpp-bridge";
 
 const REPLAY_MARKER_HEX = "7265706c61796d"; // ASCII: replaym
-const AGENT_VERSION = "v2.7.0_R2";
+const AGENT_VERSION = "v2.7.0_R3";
 
 function emit(type: string, data: unknown = null): void {
     send({ type, data });
