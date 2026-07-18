@@ -361,6 +361,7 @@ class ReplayApp:
         self.log_window = None
         self.log_text = None
         self.tutorial_window = None
+        self.rename_window = None
 
         root = tk.Tk()
         self.root = root
@@ -1027,37 +1028,187 @@ class ReplayApp:
         self.update_action_states()
 
     def rename_selected(self) -> None:
-        from tkinter import simpledialog
-
         path = self.selected_path()
         if path is None:
             self.set_status("还没有选择文件", "请先在列表中选择要重命名的回放。", self.AMBER)
             return
-        new_name = simpledialog.askstring(
-            "重命名回放",
-            "输入新的回放名称：",
-            initialvalue=path.stem,
-            parent=self.root,
-        )
-        if new_name is None:
+        self.show_rename_dialog(path)
+
+    def show_rename_dialog(self, path: Path) -> None:
+        if self.rename_window is not None and self.rename_window.winfo_exists():
+            self.rename_window.lift()
+            self.rename_window.focus_force()
             return
+
+        window = self.tk.Toplevel(self.root)
+        window.withdraw()
+        self.rename_window = window
+        window.title("重命名回放")
+        window.resizable(False, False)
+        window.configure(bg=self.CARD)
+        window.transient(self.root)
+
+        body = self.tk.Frame(window, bg=self.CARD, padx=26, pady=22)
+        body.pack(fill=self.tk.BOTH, expand=True)
+
+        heading = self.tk.Frame(body, bg=self.CARD)
+        heading.pack(fill=self.tk.X)
+        self.tk.Label(
+            heading,
+            text="✎",
+            bg="#E8F0FE",
+            fg=self.BLUE,
+            width=3,
+            height=1,
+            font=("Segoe UI Symbol", 14, "bold"),
+        ).pack(side=self.tk.LEFT, padx=(0, 13))
+        heading_text = self.tk.Frame(heading, bg=self.CARD)
+        heading_text.pack(side=self.tk.LEFT, fill=self.tk.X, expand=True)
+        self.tk.Label(
+            heading_text,
+            text="重命名回放",
+            bg=self.CARD,
+            fg=self.TEXT,
+            anchor=self.tk.W,
+            font=("Microsoft YaHei UI", 15, "bold"),
+        ).pack(fill=self.tk.X)
+        self.tk.Label(
+            heading_text,
+            text="起一个容易辨认的名称，回放内容不会改变。",
+            bg=self.CARD,
+            fg=self.MUTED,
+            anchor=self.tk.W,
+            font=("Microsoft YaHei UI", 9),
+        ).pack(fill=self.tk.X, pady=(3, 0))
+
+        self.tk.Label(
+            body,
+            text="回放名称",
+            bg=self.CARD,
+            fg=self.TEXT,
+            anchor=self.tk.W,
+            font=("Microsoft YaHei UI", 9, "bold"),
+        ).pack(fill=self.tk.X, pady=(22, 7))
+
+        input_border = self.tk.Frame(
+            body,
+            bg=self.CARD,
+            highlightbackground=self.BORDER,
+            highlightcolor=self.BLUE,
+            highlightthickness=1,
+        )
+        input_border.pack(fill=self.tk.X)
+        name_var = self.tk.StringVar(value=path.stem)
+        entry = self.tk.Entry(
+            input_border,
+            textvariable=name_var,
+            bg=self.CARD,
+            fg=self.TEXT,
+            insertbackground=self.BLUE,
+            selectbackground="#D2E3FC",
+            selectforeground=self.TEXT,
+            relief=self.tk.FLAT,
+            borderwidth=0,
+            font=("Microsoft YaHei UI", 10),
+        )
+        entry.pack(side=self.tk.LEFT, fill=self.tk.X, expand=True, padx=(12, 6), pady=10)
+        self.tk.Label(
+            input_border,
+            text=".replay",
+            bg=self.CARD,
+            fg=self.MUTED,
+            font=("Segoe UI", 9),
+        ).pack(side=self.tk.RIGHT, padx=(0, 12))
+
+        error_var = self.tk.StringVar(value="")
+        error_label = self.tk.Label(
+            body,
+            textvariable=error_var,
+            bg=self.CARD,
+            fg=self.DANGER_TEXT,
+            anchor=self.tk.W,
+            justify=self.tk.LEFT,
+            wraplength=430,
+            font=("Microsoft YaHei UI", 8),
+        )
+        error_label.pack(fill=self.tk.X, pady=(6, 0))
+
+        def close_dialog() -> None:
+            if self.rename_window is not None:
+                self.rename_window.destroy()
+                self.rename_window = None
+
+        def submit_rename(_event=None) -> None:
+            try:
+                new_path = self.store.rename(path, name_var.get())
+                self.manager.replace_selected_path(path, new_path)
+                close_dialog()
+                self.refresh()
+                if self.tree.exists(str(new_path)):
+                    self.tree.selection_set(str(new_path))
+                    self.tree.focus(str(new_path))
+                    self.tree.see(str(new_path))
+                self.update_action_states()
+                self.set_status("重命名成功", f"新的名称是 {new_path.name}", self.GREEN)
+                self.append_log(f"已将 {path.name} 重命名为 {new_path.name}")
+            except FileNotFoundError:
+                close_dialog()
+                self.set_status("文件已经不存在", "列表已自动刷新。", self.AMBER)
+                self.refresh()
+            except Exception as exc:
+                error_var.set(str(exc))
+                input_border.configure(
+                    highlightbackground=self.DANGER_TEXT,
+                    highlightcolor=self.DANGER_TEXT,
+                    highlightthickness=2,
+                )
+                entry.focus_set()
+                entry.selection_range(0, self.tk.END)
+
+        actions = self.tk.Frame(body, bg=self.CARD)
+        actions.pack(fill=self.tk.X, pady=(18, 0))
+        self._button(actions, "重命名", submit_rename, primary=True).pack(side=self.tk.RIGHT)
+        self._button(actions, "取消", close_dialog).pack(side=self.tk.RIGHT, padx=(0, 9))
+
+        def show_focus() -> None:
+            if not error_var.get():
+                input_border.configure(
+                    highlightbackground=self.BLUE,
+                    highlightcolor=self.BLUE,
+                    highlightthickness=2,
+                )
+
+        def hide_focus() -> None:
+            if not error_var.get():
+                input_border.configure(
+                    highlightbackground=self.BORDER,
+                    highlightcolor=self.BLUE,
+                    highlightthickness=1,
+                )
+
+        def clear_error(*_args) -> None:
+            if error_var.get():
+                error_var.set("")
+                input_border.configure(
+                    highlightbackground=self.BLUE,
+                    highlightcolor=self.BLUE,
+                    highlightthickness=2,
+                )
+
+        name_var.trace_add("write", clear_error)
+        entry.bind("<FocusIn>", lambda _event: show_focus())
+        entry.bind("<FocusOut>", lambda _event: hide_focus())
+        entry.bind("<Return>", submit_rename)
+        window.bind("<Escape>", lambda _event: close_dialog())
+        window.protocol("WM_DELETE_WINDOW", close_dialog)
+        self.show_centered_dialog(window, 500, 315)
         try:
-            new_path = self.store.rename(path, new_name)
-            self.manager.replace_selected_path(path, new_path)
-            self.refresh()
-            if self.tree.exists(str(new_path)):
-                self.tree.selection_set(str(new_path))
-                self.tree.focus(str(new_path))
-                self.tree.see(str(new_path))
-            self.update_action_states()
-            self.set_status("重命名成功", f"新的名称是 {new_path.name}", self.GREEN)
-            self.append_log(f"已将 {path.name} 重命名为 {new_path.name}")
-        except FileNotFoundError:
-            self.set_status("文件已经不存在", "列表已自动刷新。", self.AMBER)
-            self.refresh()
-        except Exception as exc:
-            self.set_status("重命名失败", str(exc), self.RED)
-            self.append_log(f"重命名失败：{exc}")
+            window.attributes("-topmost", True)
+        except self.tk.TclError:
+            pass
+        window.grab_set()
+        entry.focus_set()
+        entry.selection_range(0, self.tk.END)
 
     def delete_selected(self) -> None:
         from tkinter import messagebox
