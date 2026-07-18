@@ -1,97 +1,105 @@
-// MD-Replay-Editor-fix Frida Agent (Plain JS — no compilation needed)
-//
-// Hooks Master Duel's network layer to:
-// 1. Auto-save replays on duel end
-// 2. Bypass official replay limit
+// MD-Replay-Editor-fix Frida Agent
+// Hooks Master Duel's IL2CPP network layer
 
 'use strict';
+const REPLAY_MODE = 7, SOLO_MODE = 9;
+var api = {};
 
-const REPLAY_MODE = 7;
-const SOLO_MODE = 9;
+function log(m) { console.log('[MD] ' + m); }
 
-let api = {};
+function readCStr(p) { return p.isNull() ? '' : p.readCString(); }
 
-function log(msg) {
-    console.log('[MD] ' + msg);
+function tryExport(name) {
+    var p = Module.findExportByName('GameAssembly.dll', name);
+    if (p.isNull()) log('Export not found: ' + name);
+    return p;
 }
 
-// ── IL2CPP helpers via Frida ──────────────────────────────
-
-function initIl2Cpp() {
-    const domain = Module.findExportByName('GameAssembly.dll', 'il2cpp_domain_get');
-    const getAssemblies = Module.findExportByName('GameAssembly.dll', 'il2cpp_domain_get_assemblies');
-    const getImage = Module.findExportByName('GameAssembly.dll', 'il2cpp_assembly_get_image');
-    const imgGetName = Module.findExportByName('GameAssembly.dll', 'il2cpp_image_get_name');
-    const imgGetClassCount = Module.findExportByName('GameAssembly.dll', 'il2cpp_image_get_class_count');
-    const imgGetClass = Module.findExportByName('GameAssembly.dll', 'il2cpp_image_get_class');
-    const clsGetName = Module.findExportByName('GameAssembly.dll', 'il2cpp_class_get_name');
-    const clsGetNs = Module.findExportByName('GameAssembly.dll', 'il2cpp_class_get_namespace');
-    const clsGetMethods = Module.findExportByName('GameAssembly.dll', 'il2cpp_class_get_methods');
-    const clsGetFields = Module.findExportByName('GameAssembly.dll', 'il2cpp_class_get_fields');
-    const clsGetNested = Module.findExportByName('GameAssembly.dll', 'il2cpp_class_get_nested_types');
-    const clsGetProps = Module.findExportByName('GameAssembly.dll', 'il2cpp_class_get_properties');
-    const clsGetParent = Module.findExportByName('GameAssembly.dll', 'il2cpp_class_get_parent');
-    const methodGetName = Module.findExportByName('GameAssembly.dll', 'il2cpp_method_get_name');
-    const methodGetClass = Module.findExportByName('GameAssembly.dll', 'il2cpp_method_get_class');
-    const fieldGetName = Module.findExportByName('GameAssembly.dll', 'il2cpp_field_get_name');
-    const fieldGetParent = Module.findExportByName('GameAssembly.dll', 'il2cpp_field_get_parent');
-    const propGetName = Module.findExportByName('GameAssembly.dll', 'il2cpp_property_get_name');
-    const propGetGet = Module.findExportByName('GameAssembly.dll', 'il2cpp_property_get_get_method');
-    const runtimeInvoke = Module.findExportByName('GameAssembly.dll', 'il2cpp_runtime_invoke');
-    const methodGetPtr = Module.findExportByName("GameAssembly.dll", "il2cpp_method_get_pointer");
-    const methodGetParamCount = Module.findExportByName('GameAssembly.dll', 'il2cpp_method_get_param_count');
-    const fieldGetValue = Module.findExportByName('GameAssembly.dll', 'il2cpp_field_get_value_object');
-    const stringNew = Module.findExportByName('GameAssembly.dll', 'il2cpp_string_new');
-    const objectNew = Module.findExportByName('GameAssembly.dll', 'il2cpp_object_new');
-
-    api = {
-        domainGet: new NativeFunction(domain, 'pointer', []),
-        getAssemblies: new NativeFunction(getAssemblies, 'pointer', ['pointer', 'pointer']),
-        getImage: new NativeFunction(getImage, 'pointer', ['pointer']),
-        imgGetName: new NativeFunction(imgGetName, 'pointer', ['pointer']),
-        imgGetClassCount: new NativeFunction(imgGetClassCount, 'uint32', ['pointer']),
-        imgGetClass: new NativeFunction(imgGetClass, 'pointer', ['pointer', 'uint32']),
-        clsGetName: new NativeFunction(clsGetName, 'pointer', ['pointer']),
-        clsGetNs: new NativeFunction(clsGetNs, 'pointer', ['pointer']),
-        clsGetMethods: new NativeFunction(clsGetMethods, 'pointer', ['pointer', 'pointer']),
-        clsGetFields: new NativeFunction(clsGetFields, 'pointer', ['pointer', 'pointer']),
-        clsGetNested: new NativeFunction(clsGetNested, 'pointer', ['pointer', 'pointer']),
-        clsGetProps: new NativeFunction(clsGetProps, 'pointer', ['pointer', 'pointer']),
-        clsGetParent: new NativeFunction(clsGetParent, 'pointer', ['pointer']),
-        methodGetName: new NativeFunction(methodGetName, 'pointer', ['pointer']),
-        methodGetClass: new NativeFunction(methodGetClass, 'pointer', ['pointer']),
-        methodGetParamCount: new NativeFunction(methodGetParamCount, 'uint32', ['pointer']),
-        fieldGetName: new NativeFunction(fieldGetName, 'pointer', ['pointer']),
-        fieldGetParent: new NativeFunction(fieldGetParent, 'pointer', ['pointer']),
-        fieldGetValue: new NativeFunction(fieldGetValue, 'pointer', ['pointer', 'pointer']),
-        propGetName: new NativeFunction(propGetName, 'pointer', ['pointer']),
-        propGetGet: new NativeFunction(propGetGet, 'pointer', ['pointer']),
-        runtimeInvoke: new NativeFunction(runtimeInvoke, 'pointer', ['pointer', 'pointer', 'pointer', 'pointer']),
-        methodGetPtr: new NativeFunction(methodGetPtr, "pointer", ["pointer"]),
-        stringNew: new NativeFunction(stringNew, 'pointer', ['pointer']),
-        objectNew: new NativeFunction(objectNew, 'pointer', ['pointer']),
+function initApi() {
+    var defs = {
+        domainGet: ['il2cpp_domain_get', 'pointer', []],
+        getAssemblies: ['il2cpp_domain_get_assemblies', 'pointer', ['pointer','pointer']],
+        getImage: ['il2cpp_assembly_get_image', 'pointer', ['pointer']],
+        imgGetName: ['il2cpp_image_get_name', 'pointer', ['pointer']],
+        imgGetClassCount: ['il2cpp_image_get_class_count', 'uint32', ['pointer']],
+        imgGetClass: ['il2cpp_image_get_class', 'pointer', ['pointer','uint32']],
+        clsGetName: ['il2cpp_class_get_name', 'pointer', ['pointer']],
+        clsGetNs: ['il2cpp_class_get_namespace', 'pointer', ['pointer']],
+        clsGetMethods: ['il2cpp_class_get_methods', 'pointer', ['pointer','pointer']],
+        clsGetFields: ['il2cpp_class_get_fields', 'pointer', ['pointer','pointer']],
+        clsGetNested: ['il2cpp_class_get_nested_types', 'pointer', ['pointer','pointer']],
+        clsGetProps: ['il2cpp_class_get_properties', 'pointer', ['pointer','pointer']],
+        clsGetParent: ['il2cpp_class_get_parent', 'pointer', ['pointer']],
+        methodGetName: ['il2cpp_method_get_name', 'pointer', ['pointer']],
+        methodGetClass: ['il2cpp_method_get_class', 'pointer', ['pointer']],
+        methodGetParamCount: ['il2cpp_method_get_param_count', 'uint32', ['pointer']],
+        fieldGetName: ['il2cpp_field_get_name', 'pointer', ['pointer']],
+        fieldGetParent: ['il2cpp_field_get_parent', 'pointer', ['pointer']],
+        fieldGetValue: ['il2cpp_field_get_value_object', 'pointer', ['pointer','pointer']],
+        propGetName: ['il2cpp_property_get_name', 'pointer', ['pointer']],
+        propGetGet: ['il2cpp_property_get_get_method', 'pointer', ['pointer']],
+        runtimeInvoke: ['il2cpp_runtime_invoke', 'pointer', ['pointer','pointer','pointer','pointer']],
+        stringNew: ['il2cpp_string_new', 'pointer', ['pointer']],
+        objectNew: ['il2cpp_object_new', 'pointer', ['pointer']]
     };
+
+    for (var k in defs) {
+        var d = defs[k];
+        var p = Module.findExportByName('GameAssembly.dll', d[0]);
+        if (p.isNull()) {
+            log('MISSING EXPORT: ' + d[0]);
+            api[k] = null;
+        } else {
+            api[k] = new NativeFunction(p, d[1], d[2]);
+        }
+    }
+
+    // il2cpp_method_get_pointer may not exist; fallback: read from struct
+    var methodGetPtr = Module.findExportByName('GameAssembly.dll', 'il2cpp_method_get_pointer');
+    if (!methodGetPtr.isNull()) {
+        api.methodGetPtr = new NativeFunction(methodGetPtr, 'pointer', ['pointer']);
+    } else {
+        log('il2cpp_method_get_pointer not found, using struct fallback');
+        api.methodGetPtr = function(methodPtr) {
+            // MethodInfo struct: first pointer-sized field is methodPointer
+            return methodPtr.readPointer();
+        };
+    }
 }
 
-function readCStr(p) {
-    return p.isNull() ? '' : p.readCString();
+function hookMethod(method, onEnter) {
+    if (method.isNull()) return false;
+    var fnPtr = api.methodGetPtr(method);
+    if (fnPtr.isNull()) { log('No code ptr'); return false; }
+    Interceptor.attach(fnPtr, {
+        onEnter: function(args) {
+            try { onEnter(args); } catch (e) { log('Hook err: ' + e.message); }
+        }
+    });
+    return true;
+}
+
+function findAndHook(cls, methodName, paramCount, onEnter) {
+    var method = findMethod(cls, methodName, paramCount);
+    if (method.isNull()) { log('Method not found: ' + methodName); return false; }
+    return hookMethod(method, onEnter);
 }
 
 function findClass(assemblyImgPtr, className, namespace) {
-    const count = api.imgGetClassCount(assemblyImgPtr);
-    for (let i = 0; i < count; i++) {
-        const cls = api.imgGetClass(assemblyImgPtr, i);
-        const name = readCStr(api.clsGetName(cls));
-        const ns = readCStr(api.clsGetNs(cls));
+    var count = api.imgGetClassCount(assemblyImgPtr);
+    for (var i = 0; i < count; i++) {
+        var cls = api.imgGetClass(assemblyImgPtr, i);
+        var name = readCStr(api.clsGetName(cls));
+        var ns = readCStr(api.clsGetNs(cls));
         if (name === className && ns === namespace) return cls;
     }
     return NULL;
 }
 
 function findNestedClass(parentClass, className) {
-    const iter = Memory.alloc(Process.pointerSize);
+    var iter = Memory.alloc(Process.pointerSize);
     iter.writePointer(NULL);
-    let cls;
+    var cls;
     while ((cls = api.clsGetNested(parentClass, iter))) {
         if (readCStr(api.clsGetName(cls)) === className) return cls;
     }
@@ -99,9 +107,9 @@ function findNestedClass(parentClass, className) {
 }
 
 function findMethod(cls, methodName, paramCount) {
-    const iter = Memory.alloc(Process.pointerSize);
+    var iter = Memory.alloc(Process.pointerSize);
     iter.writePointer(NULL);
-    let method;
+    var method;
     while ((method = api.clsGetMethods(cls, iter))) {
         if (readCStr(api.methodGetName(method)) === methodName) {
             if (paramCount === -1 || api.methodGetParamCount(method) === paramCount)
@@ -112,196 +120,152 @@ function findMethod(cls, methodName, paramCount) {
 }
 
 function findField(cls, fieldName) {
-    const iter = Memory.alloc(Process.pointerSize);
+    var iter = Memory.alloc(Process.pointerSize);
     iter.writePointer(NULL);
-    let field;
+    var field;
     while ((field = api.clsGetFields(cls, iter))) {
         if (readCStr(api.fieldGetName(field)) === fieldName) return field;
     }
     return NULL;
 }
 
-function hookMethod(method, onEnter) {
-    if (method.isNull()) return false;
-    var fnPtr = api.methodGetPtr(method);
-    if (fnPtr.isNull()) { log("No code ptr for method"); return false; }
-    Interceptor.attach(fnPtr, {
-        onEnter: function(args) {
-            try { onEnter(args); } catch (e) { log("Hook error: " + e.message); }
-        }
-    });
-    return true;
-}
-
-function findAndHook(cls, methodName, paramCount, onEnter) {
-    var method = findMethod(cls, methodName, paramCount);
-    if (method.isNull()) { log("Method not found: " + methodName); return false; }
-    return hookMethod(method, onEnter);
-}
 function main() {
     try {
-        initIl2Cpp();
+        initApi();
+        // Verify critical APIs
+        var missing = false;
+        var critical = ['domainGet','getAssemblies','getImage','imgGetName','imgGetClassCount','imgGetClass',
+            'clsGetName','clsGetNs','clsGetMethods','methodGetName','methodGetParamCount',
+            'fieldGetName','fieldGetValue','propGetName','propGetGet',
+            'runtimeInvoke','stringNew','methodGetPtr'];
+        for (var i = 0; i < critical.length; i++) {
+            if (!api[critical[i]]) { log('CRITICAL API MISSING: ' + critical[i]); missing = true; }
+        }
+        if (missing) { send({ type: 'error', data: { message: 'Critical IL2CPP exports missing' } }); return; }
     } catch (e) {
-        log('FAILED to init IL2CPP: ' + e.message);
-        send({ type: 'error', data: { message: 'IL2CPP init failed: ' + e.message } });
+        log('IL2CPP init failed: ' + e.message);
+        send({ type: 'error', data: { message: 'IL2CPP init: ' + e.message } });
         return;
     }
 
     try {
-        const domain = api.domainGet();
-        const countPtr = Memory.alloc(4);
-        countPtr.writeU32(0);
-        const assemblies = api.getAssemblies(domain, countPtr);
-        const count = countPtr.readU32();
+        var domain = api.domainGet();
+        var countPtr = Memory.alloc(4); countPtr.writeU32(0);
+        var assemblies = api.getAssemblies(domain, countPtr);
+        var count = countPtr.readU32();
+        var asmCSharp = NULL;
 
-        let asmCSharp = NULL;
-        for (let i = 0; i < count; i++) {
-            const asm = assemblies.add(i * Process.pointerSize).readPointer();
-            const img = api.getImage(asm);
-            const name = readCStr(api.imgGetName(img));
-            if (name === 'Assembly-CSharp') {
-                asmCSharp = img;
-                break;
-            }
+        for (var i = 0; i < count; i++) {
+            var img = api.getImage(assemblies.add(i * Process.pointerSize).readPointer());
+            if (readCStr(api.imgGetName(img)) === 'Assembly-CSharp') { asmCSharp = img; break; }
         }
 
-        if (asmCSharp.isNull()) {
-            send({ type: 'error', data: { message: 'Assembly-CSharp not found' } });
-            return;
-        }
-
+        if (asmCSharp.isNull()) { send({ type: 'error', data: { message: 'Assembly-CSharp not found' } }); return; }
         log('Found Assembly-CSharp');
 
-        // Find classes
-        const requestClass = findClass(asmCSharp, 'Request', 'YgomSystem.Network');
-        const handleClass = findClass(asmCSharp, 'Handle', 'YgomSystem.Network');
-        const clientWorkClass = findClass(asmCSharp, 'ClientWork', 'YgomSystem.Utility');
-        const networkMain = findClass(asmCSharp, 'NetworkMain', '');
-        const requestStructure = findNestedClass(networkMain, 'RequestStructure');
+        var requestClass = findClass(asmCSharp, 'Request', 'YgomSystem.Network');
+        var handleClass = findClass(asmCSharp, 'Handle', 'YgomSystem.Network');
+        var clientWorkClass = findClass(asmCSharp, 'ClientWork', 'YgomSystem.Utility');
+        var networkMain = findClass(asmCSharp, 'NetworkMain', '');
+        var requestStructure = findNestedClass(networkMain, 'RequestStructure');
 
         if (requestClass.isNull() || handleClass.isNull() || clientWorkClass.isNull() || requestStructure.isNull()) {
             send({ type: 'error', data: { message: 'Required classes not found' } });
             return;
         }
 
-        // Find methods and fields
-        const entryMethod = findMethod(requestClass, 'Entry', 3);
-        const cmdEventMethod = findMethod(requestClass, 'CommandEvent', 2);
-        const isCompletedMethod = findMethod(handleClass, 'IsCompleted', 0);
-        const fieldRequest = findField(handleClass, 'm_Request');
-        const getCommandMethod = findMethod(requestStructure, 'get_Command', 0);
-        const getByJsonPath = findMethod(clientWorkClass, 'getByJsonPath', 1);
-        const updateJson = findMethod(clientWorkClass, 'updateJson', 2);
-        const serializeMethod = findMethod(clientWorkClass, 'SerializePath', 1);
+        var fieldRequest = findField(handleClass, 'm_Request');
+        var getCommandMethod = findMethod(requestStructure, 'get_Command', 0);
+        var getByJsonPath = findMethod(clientWorkClass, 'getByJsonPath', 1);
+        var updateJson = findMethod(clientWorkClass, 'updateJson', 2);
 
-        // MiniJSON in assembly-csharp-firstpass
-        const asmFirstPass = (() => {
-            for (let i = 0; i < count; i++) {
-                const asm = assemblies.add(i * Process.pointerSize).readPointer();
-                const img = api.getImage(asm);
-                if (readCStr(api.imgGetName(img)) === 'Assembly-CSharp-firstpass') return img;
-            }
-            return NULL;
-        })();
-        let miniJsonClass = NULL;
-        let miniJsonSerialize = NULL;
+        // MiniJSON bridge
+        var asmFirstPass = NULL;
+        for (var i = 0; i < count; i++) {
+            var img = api.getImage(assemblies.add(i * Process.pointerSize).readPointer());
+            if (readCStr(api.imgGetName(img)) === 'Assembly-CSharp-firstpass') { asmFirstPass = img; break; }
+        }
+        var miniJsonSerialize = NULL;
         if (!asmFirstPass.isNull()) {
-            miniJsonClass = findClass(asmFirstPass, 'Json', 'MiniJSON');
-            miniJsonSerialize = miniJsonClass.isNull() ? NULL : findMethod(miniJsonClass, 'Serialize', 1);
+            var mj = findClass(asmFirstPass, 'Json', 'MiniJSON');
+            if (!mj.isNull()) miniJsonSerialize = findMethod(mj, 'Serialize', 1);
         }
 
-        // Helper: invoke a static method
         function invokeStaticMethod(method, args) {
-            const argPtr = Memory.alloc(args.length * Process.pointerSize);
-            for (let i = 0; i < args.length; i++) {
+            var argPtr = Memory.alloc(args.length * Process.pointerSize);
+            for (var i = 0; i < args.length; i++)
                 argPtr.add(i * Process.pointerSize).writePointer(args[i]);
-            }
-            const exc = Memory.alloc(Process.pointerSize);
-            exc.writePointer(NULL);
+            var exc = Memory.alloc(Process.pointerSize); exc.writePointer(NULL);
             return api.runtimeInvoke(method, NULL, argPtr, exc);
         }
 
-        // Helper: get string value from ClientWork
         function getClientWorkJson(jsonPath) {
-            if (getByJsonPath.isNull()) return NULL;
-            const strPtr = api.stringNew(Memory.allocUtf8String(jsonPath));
-            const result = invokeStaticMethod(getByJsonPath, [strPtr]);
+            if (!getByJsonPath) return NULL;
+            var strPtr = api.stringNew(Memory.allocUtf8String(jsonPath));
+            var result = invokeStaticMethod(getByJsonPath, [strPtr]);
             if (result.isNull()) return NULL;
-            if (miniJsonSerialize.isNull()) return result;
-            return invokeStaticMethod(miniJsonSerialize, [result]);
+            if (miniJsonSerialize) return invokeStaticMethod(miniJsonSerialize, [result]);
+            return result;
         }
 
         // Hook Request.Entry
-        findAndHook(requestClass, "Entry", 3, function(args) {
+        findAndHook(requestClass, 'Entry', 3, function(args) {
             var cmd = readCStr(args[0]);
-            if (cmd) {
-                if (cmd === "Duel.begin" || cmd === "Duel.end" || cmd === "User.replay_list") {
-                    send({ type: "network_request", data: cmd });
-                }
-            }
+            if (cmd && (cmd === 'Duel.begin' || cmd === 'Duel.end' || cmd === 'User.replay_list'))
+                send({ type: 'network_request', data: cmd });
         });
 
-        // Hook Request.CommandEvent for response interception
-        const isCompletedField = findField(handleClass, 'IsCompleted') || findField(handleClass, 'm_IsCompleted');
-        findAndHook(requestClass, "CommandEvent", 2, function(args) {
+        // Hook Request.CommandEvent
+        findAndHook(requestClass, 'CommandEvent', 2, function(args) {
             try {
                 var handle = args[1];
                 if (handle.isNull()) return;
                 var requestPtr = api.fieldGetValue(fieldRequest, handle);
                 if (requestPtr.isNull()) return;
                 var cmdResult = invokeStaticMethod(getCommandMethod, [requestPtr]);
-                var cmd = cmdResult.isNull() ? "" : readCStr(cmdResult);
+                var cmd = cmdResult.isNull() ? '' : readCStr(cmdResult);
                 if (!cmd) return;
 
-                if (cmd === "Duel.end") {
-                    var jsonResult = getClientWorkJson("Duel");
-                    if (jsonResult && !jsonResult.isNull()) {
-                        var jsonStr = readCStr(jsonResult);
-                        if (jsonStr) {
+                if (cmd === 'Duel.end') {
+                    var jr = getClientWorkJson('Duel');
+                    if (jr && !jr.isNull()) {
+                        var js = readCStr(jr);
+                        if (js) {
                             try {
-                                var data = JSON.parse(jsonStr);
+                                var data = JSON.parse(js);
                                 var gm = data.GameMode || 0;
                                 if (gm === REPLAY_MODE || gm === SOLO_MODE) {
                                     var did = data.did || Date.now();
-                                    var fileName = did + "_" + Date.now() + ".json";
-                                    send({ type: "save_replay", data: { fileName: fileName, content: jsonStr, gameMode: gm, did: did } });
-                                    log("Auto-save: " + fileName);
+                                    send({ type: 'save_replay', data: { fileName: did + '_' + Date.now() + '.json', content: js, gameMode: gm, did: did } });
+                                    log('Auto-saved');
                                 }
                             } catch (e) {}
                         }
                     }
-                } else if (cmd === "User.replay_list") {
-                    var infoResult = getClientWorkJson("ReplayInfo");
-                    if (infoResult && !infoResult.isNull()) {
+                } else if (cmd === 'User.replay_list') {
+                    var ir = getClientWorkJson('ReplayInfo');
+                    if (ir && !ir.isNull()) {
                         try {
-                            var info = JSON.parse(readCStr(infoResult));
+                            var info = JSON.parse(readCStr(ir));
                             if (info && info.max !== undefined) {
-                                var oldMax = info.max;
                                 info.max = 99999;
-                                var pathStr = api.stringNew(Memory.allocUtf8String("ReplayInfo"));
-                                var valStr = api.stringNew(Memory.allocUtf8String(JSON.stringify(info)));
-                                invokeStaticMethod(updateJson, [pathStr, valStr]);
-                                if (oldMax !== 99999) {
-                                    log("Limit bypassed: " + oldMax + " -> 99999");
-                                    send({ type: "limit_bypassed", data: { oldMax: oldMax } });
-                                }
+                                invokeStaticMethod(updateJson, [api.stringNew(Memory.allocUtf8String('ReplayInfo')), api.stringNew(Memory.allocUtf8String(JSON.stringify(info)))]);
+                                log('Limit bypassed');
+                                send({ type: 'limit_bypassed', data: {} });
                             }
                         } catch (e) {}
                     }
                 }
-            } catch (e) {
-                log("CommandEvent error: " + e.message);
-            }
+            } catch (e) { log('CmdEvent err: ' + e.message); }
         });
 
         log('All hooks installed!');
         send({ type: 'ready' });
 
     } catch (e) {
-        log('FATAL: ' + e.message + '\n' + e.stack);
+        log('FATAL: ' + e.message);
         send({ type: 'error', data: { message: e.message } });
     }
 }
 
-// Wait for perform
 setImmediate(main);
