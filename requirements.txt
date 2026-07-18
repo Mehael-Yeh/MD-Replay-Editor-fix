@@ -1,2 +1,2 @@
-frida==16.7.19
+frida==17.16.0
 PyInstaller==6.15.0

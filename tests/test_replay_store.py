@@ -51,6 +51,17 @@ class FakeScript:
 
 
 class ReplayManagerTests(unittest.TestCase):
+    def test_fatal_agent_message_unblocks_startup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = ReplayManager(ReplayStore(Path(tmp)))
+            manager._on_message(
+                {"type": "send", "payload": {"type": "fatal", "data": "bad Unity version"}},
+                None,
+            )
+            self.assertTrue(manager._ready_event.is_set())
+            self.assertEqual(manager._startup_error, "bad Unity version")
+            self.assertFalse(manager.attached)
+
     def test_capture_saves_and_replies_with_original(self):
         with tempfile.TemporaryDirectory() as tmp:
             events = []

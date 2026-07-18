@@ -4,17 +4,27 @@
 
 一个开箱即用的《游戏王 Master Duel》本地回放归档与播放工具。
 
+当前版本：**v2.7.0_R1**，对应 Master Duel **2.7.0**。
+
 运行 EXE 并连接游戏后，只要在游戏内播放过一条回放，程序就会把完整回放响应自动保存到本地。之后可以选择任意已保存文件，借用游戏里任意一条可播放的官方回放作为入口，在游戏内重新播放本地回放。
+
+## 项目来源与关系
+
+本项目的目标是复活并继续维护 [crazydoomy/MD-Replay-Editor](https://github.com/crazydoomy/MD-Replay-Editor)，让它重新适配当前版本的 Master Duel，并整理成普通用户下载后即可运行的单文件 EXE。
+
+- **MD-Replay-Editor** 提供了最初的 Frida 回放响应抓取和本地文件替换思路。本项目保留这一轻量路线，并重写了代理兼容、文件管理、状态处理和操作界面。
+- **YgoMaster** 是 Master Duel 离线服务端与客户端修改项目。本项目参考了 [pixeltris/YgoMaster](https://github.com/pixeltris/YgoMaster) 中的网络命令生命周期、`ClientWork` 数据结构、本地回放管理和异常恢复设计。
+- 本项目不会打包或启动 YgoMaster，也不尝试替代其离线服务器功能；这里专注于“一个 EXE、连接正在运行的官方客户端、自动保存和播放本地回放”。
 
 ## 使用方法
 
 1. 从 [Releases](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/releases) 下载最新的 `MD-Replay-Editor-fix.exe`。
 2. 启动 Steam 版 Master Duel，并停留在主界面。
-3. 运行 EXE，点击 **获取并监听**。
+3. 运行 EXE，点击 **连接游戏并开始自动保存**。
 4. 在游戏内播放想保存的回放。程序会自动保存到 EXE 同目录的 `replays` 文件夹。
-5. 要播放本地回放时，在程序中选中文件并点击 **借壳回放所选文件**，然后回到游戏播放任意一条当前可用的官方回放。
+5. 要播放本地回放时，在程序中选中文件并点击 **用所选文件在游戏里回放**，然后回到游戏播放任意一条当前可用的官方回放。
 
-借壳只对下一次回放响应生效，触发后会自动恢复监听和保存，不会永久修改游戏文件或服务器数据。
+本地文件只会替换下一次回放，触发后自动恢复监听和保存，不会永久修改游戏文件或服务器数据。
 
 ## 功能
 
@@ -30,7 +40,7 @@
 项目通过 Frida 注入 `masterduel.exe`，Hook IL2CPP 方法 `YgomSystem.Network.FormatYgom.DeserializeAsync`：
 
 - 当游戏收到包含 `replaym` 数据段的回放响应时，将原始字节完整编码为十六进制并写入 `.replay` 文件。
-- 借壳模式下，将所选 `.replay` 的字节送回游戏，替换本次官方回放响应。
+- 播放本地文件时，将所选 `.replay` 的字节送回游戏，仅替换本次官方回放响应。
 - 任意异常都会回退到游戏原始响应，避免因文件错误让回放加载线程一直等待。
 
 这个方案继承了原版 MD-Replay-Editor 的原始数据抓取思路，并参考 YgoMaster 的本地回放管理、状态恢复和网络劫持设计。YgoMaster 使用的是更重型的本地服务器和原生 IL2CPP Hook；本项目为满足单 EXE 和极简操作目标，只保留必要的响应级抓取与一次性替换。
