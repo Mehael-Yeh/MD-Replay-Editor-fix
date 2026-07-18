@@ -9,7 +9,7 @@ namespace MDReplayEditorFix
     /// Wrapper for YgomSystem.Utility.ClientWork - allows reading/writing game JSON data.
     /// Extracted from YgoMaster's Program.cs.
     /// </summary>
-    internal static class ClientWork
+    internal static unsafe class ClientWork
     {
         static IL2Class classInfo;
         static IL2Method methodDeleteByJsonPath;
