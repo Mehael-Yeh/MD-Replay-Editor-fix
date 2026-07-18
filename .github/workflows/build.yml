@@ -2,18 +2,18 @@ name: Build
 
 permissions:
   contents: write
-  actions: read
-  checks: read
 
 on:
   push:
-    branches: [ master ]
-    tags: [ 'v*' ]
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version'
-        default: 'v1.0.0'
+        description: "Release tag (only used for manual releases)"
+        required: false
+        default: ""
 
 jobs:
   build:
@@ -21,49 +21,59 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
 
-      - name: Build Frida agent (TypeScript)
-        shell: pwsh
+      - name: Build Frida agent
+        working-directory: agent
         run: |
-          cd agent
-          npm install 2>&1
-          if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
-          npm run build 2>&1
-          if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
-          if (-not (Test-Path _.js)) { throw "_.js was NOT created!" }
-          Write-Host "✅ _.js created: $((Get-Item _.js).Length / 1KB) KB"
+          npm ci
+          npm run build
+          if (-not (Test-Path _.js)) { throw "agent/_.js was not created" }
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install Python deps
-        run: pip install frida-tools pyinstaller
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt
 
-      - name: Package exe
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Package portable EXE
         run: |
-          pyinstaller --onefile --name "MD-Replay-Editor-fix" --add-data "agent;agent" main.py
-          dir dist\*.exe
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name MD-Replay-Editor-fix `
+            --add-data "agent/_.js;agent" `
+            --collect-all frida `
+            main.py
+          if (-not (Test-Path dist\MD-Replay-Editor-fix.exe)) { throw "EXE was not created" }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MD-Replay-Editor-fix
-          path: dist\MD-Replay-Editor-fix.exe
+          name: MD-Replay-Editor-fix-windows
+          path: dist/MD-Replay-Editor-fix.exe
+          if-no-files-found: error
 
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+      - name: Create tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
-          name: MD-Replay-Editor-fix ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
-          body: |
-            ## MD-Replay-Editor-fix
+          generate_release_notes: true
+          files: dist/MD-Replay-Editor-fix.exe
 
-            下载 exe，启动 Master Duel，运行，点 Attach 即可。
-          files: dist\MD-Replay-Editor-fix.exe
+      - name: Create manual release
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.version != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: MD-Replay-Editor-fix ${{ github.event.inputs.version }}
+          generate_release_notes: true
+          files: dist/MD-Replay-Editor-fix.exe

@@ -1,2 +1,2 @@
-frida-tools>=12.0.0
-PyInstaller>=6.0.0
+frida==16.7.19
+PyInstaller==6.15.0

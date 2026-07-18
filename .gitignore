@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+agent/node_modules/
+agent/_.js
+
+build/
+dist/
+*.spec
+replays/
