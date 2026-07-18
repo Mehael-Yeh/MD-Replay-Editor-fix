@@ -1,0 +1,145 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ master, main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v1.0.0)'
+        required: false
+        default: 'v1.0.0-ci'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ============================================================
+      #  STEP 1: Install .NET Framework 4.8 SDK + detect MSBuild
+      # ============================================================
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '17.0'
+
+      - name: Setup Visual Studio C++ tools
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # ============================================================
+      #  STEP 2: Download BepInEx 6 IL2CPP reference assemblies
+      # ============================================================
+      - name: Download BepInEx 6 IL2CPP
+        shell: pwsh
+        run: |
+          # Latest BepInEx 6 IL2CPP release
+          $repo = "BepInEx/BepInEx"
+          $releases = "https://api.github.com/repos/$repo/releases/latest"
+          $tag = (Invoke-WebRequest $releases | ConvertFrom-Json).tag_name
+          Write-Host "Latest BepInEx release: $tag"
+
+          $beZip = "BepInEx_il2cpp_x64_$tag.zip"
+          $dlUrl = "https://github.com/$repo/releases/download/$tag/$beZip"
+          Write-Host "Downloading: $dlUrl"
+          Invoke-WebRequest $dlUrl -OutFile "$env:TEMP\$beZip" -UseBasicParsing
+
+          Expand-Archive "$env:TEMP\$beZip" -DestinationPath "$env:TEMP\BepInEx" -Force
+          Write-Host "BepInEx extracted to $env:TEMP\BepInEx"
+          Get-ChildItem "$env:TEMP\BepInEx" -Recurse -Filter "*.dll" | Select-Object Name, FullName
+
+      # ============================================================
+      #  STEP 3: Build C# plugin with MSBuild
+      # ============================================================
+      - name: Build C# Plugin
+        shell: cmd
+        run: |
+          set BEPINEX_DIR=%TEMP%\BepInEx\BepInEx\core
+          echo "BepInEx dir: %BEPINEX_DIR%"
+          dir "%BEPINEX_DIR%\BepInEx.dll" 2>nul || dir "%BEPINEX_DIR%" /s /b *.dll 2>nul
+          
+          msbuild MD-Replay-Editor-fix.csproj /p:Configuration=Release /p:BEPINEX_DIR="%BEPINEX_DIR%" /p:Platform=x64 /t:Rebuild /v:m
+          
+          if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
+          echo "=== Build output ==="
+          dir bin\Release\*.dll
+
+      # ============================================================
+      #  STEP 4: Build C++ YgoMasterLoader
+      # ============================================================
+      - name: Build YgoMasterLoader (C++)
+        shell: cmd
+        run: |
+          cd YgoMasterLoader
+          cl YgoMasterLoader.cpp /LD /DWITHDETOURS /Fe:..\bin\Release\YgoMasterLoader.dll /EHsc /I. 2>&1
+          cd ..
+          echo "=== Loader output ==="
+          dir bin\Release\YgoMasterLoader.dll
+
+      # ============================================================
+      #  STEP 5: Package release artifacts
+      # ============================================================
+      - name: Package build artifacts
+        shell: pwsh
+        run: |
+          $releaseDir = "MD-Replay-Editor-fix"
+          New-Item -ItemType Directory -Force -Path $releaseDir
+
+          Copy-Item "bin\Release\MD-Replay-Editor-fix.dll" -Destination "$releaseDir\" -ErrorAction SilentlyContinue
+          Copy-Item "bin\Release\YgoMasterLoader.dll" -Destination "$releaseDir\" -ErrorAction SilentlyContinue
+          Copy-Item "README.md" -Destination "$releaseDir\"
+          Copy-Item "LICENSE" -Destination "$releaseDir\" -ErrorAction SilentlyContinue
+          
+          # Verify
+          Write-Host "=== Package contents ==="
+          Get-ChildItem $releaseDir -Recurse | Select-Object Name, Length
+
+          # Compress
+          Compress-Archive -Path "$releaseDir\*" -DestinationPath "MD-Replay-Editor-fix.zip" -Force
+          Write-Host "Package created: MD-Replay-Editor-fix.zip ($((Get-Item 'MD-Replay-Editor-fix.zip').Length / 1KB) KB)"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: MD-Replay-Editor-fix
+          path: |
+            bin\Release\*.dll
+            MD-Replay-Editor-fix.zip
+          if-no-files-found: warn
+
+      # ============================================================
+      #  STEP 6: Create GitHub Release (only on tags or manual dispatch)
+      # ============================================================
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+          name: MD-Replay-Editor-fix ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+          body: |
+            ## MD-Replay-Editor-fix
+
+            ### 包含
+            - `MD-Replay-Editor-fix.dll` — BepInEx 6 IL2CPP 插件
+            - `YgoMasterLoader.dll` — 原生 Hook DLL（需放在插件同目录）
+            - `README.md` — 安装说明
+
+            ### 安装
+            1. 解压 `MD-Replay-Editor-fix.zip`
+            2. 将两个 `.dll` 复制到 `BepInEx/plugins/`
+            3. 通过 BepInEx 启动 Master Duel
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') || contains(github.event.inputs.version, '-') }}
+          files: |
+            MD-Replay-Editor-fix.zip
+            bin\Release\MD-Replay-Editor-fix.dll
+            bin\Release\YgoMasterLoader.dll
