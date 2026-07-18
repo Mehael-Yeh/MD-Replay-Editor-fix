@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using IL2CPP;
+using YgoMasterClient;
 
 namespace MDReplayEditorFix
 {
