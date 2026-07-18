@@ -14,7 +14,7 @@
 
 本项目复活并继续维护 [crazydoomy/MD-Replay-Editor](https://github.com/crazydoomy/MD-Replay-Editor)，保留其 Frida 回放响应抓取与替换思路，并重写了版本兼容、文件管理、状态处理和图形界面。
 
-项目同时参考了 [pixeltris/YgoMaster](https://github.com/pixeltris/YgoMaster) 的 Master Duel 网络流程、`ClientWork` 数据结构和本地回放管理设计，但不包含或启动 YgoMaster。
+项目同时参考了 [pixeltris/YgoMaster](https://github.com/pixeltris/YgoMaster) 的 Master Duel 网络流程、`ClientWork` 数据结构和本地回放管理设计。
 
 ## 使用方法
 
@@ -73,11 +73,6 @@ pyinstaller --noconfirm --clean --onefile --windowed `
 
 输出文件位于 `dist\MD-Replay-Editor-fix.exe`。
 
-## 上游兼容监测
-
-`Sync YgoMaster compatibility data` 工作流每 6 小时检查一次 YgoMaster 中与游戏版本、Unity、网络反序列化和回放有关的文件。发现变化后会更新候选分支，运行测试并尝试创建 PR；如果仓库不允许 Actions 创建 PR，则改为创建 Issue。
-
-自动化不会合并候选更新或发布新版。合并前仍需在官方客户端中验证连接、回放抓取和本地回放播放。
 
 ## 致谢
 
