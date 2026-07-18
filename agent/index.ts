@@ -1,7 +1,7 @@
 import "frida-il2cpp-bridge";
 
 const REPLAY_MARKER_HEX = "7265706c61796d"; // ASCII: replaym
-const AGENT_VERSION = "v2.7.0_R1";
+const AGENT_VERSION = "v2.7.0_R2";
 
 function emit(type: string, data: unknown = null): void {
     send({ type, data });
@@ -26,8 +26,26 @@ function hexToBytes(hex: string): number[] {
     return result;
 }
 
+function readGameVersion(game: Il2Cpp.Image): string | null {
+    try {
+        const versionClass = game.tryClass("YgomSystem.Utility.Version");
+        const getter =
+            versionClass?.tryMethod("get_AppCommonVersion", 0) ??
+            versionClass?.tryMethod("get_AppVersion", 0);
+        if (!getter) {
+            return null;
+        }
+        const value = getter.invoke() as Il2Cpp.String;
+        return value?.content ?? null;
+    } catch (error) {
+        emit("log", `无法读取游戏版本：${error}`);
+        return null;
+    }
+}
+
 Il2Cpp.perform(() => {
     const game = Il2Cpp.domain.assembly("Assembly-CSharp").image;
+    const gameVersion = readGameVersion(game);
 
     const formatClass =
         game.tryClass("YgomSystem.Network.FormatYgom") ??
@@ -71,6 +89,7 @@ Il2Cpp.perform(() => {
 
     emit("ready", {
         version: AGENT_VERSION,
+        gameVersion,
         hook: "YgomSystem.Network.FormatYgom.DeserializeAsync"
     });
 }).catch(error => emit("fatal", `IL2CPP 初始化失败：${error}`));

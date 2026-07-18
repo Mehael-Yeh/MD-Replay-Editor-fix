@@ -6,12 +6,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import platform
 import queue
 import re
 import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -19,7 +21,10 @@ from typing import Callable, Optional
 
 
 APP_NAME = "MD-Replay-Editor-fix"
-APP_VERSION = "v2.7.0_R1"
+APP_VERSION = "v2.7.0_R2"
+SUPPORTED_GAME_VERSION = "2.7.0"
+GITHUB_URL = "https://github.com/Mehael-Yeh/MD-Replay-Editor-fix"
+GITHUB_ISSUES_URL = f"{GITHUB_URL}/issues/new"
 REPLAY_MARKER = b"replaym"
 HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 READY_TIMEOUT_SECONDS = 20
@@ -73,6 +78,13 @@ class ReplayStore:
     def read(self, path: Path) -> str:
         return validate_replay_hex(path.read_text(encoding="ascii"))
 
+    def delete(self, path: Path) -> None:
+        directory = self.directory.resolve()
+        target = path.resolve()
+        if target.parent != directory or target.suffix.lower() != ".replay":
+            raise ValueError("只能删除回放保存目录中的 .replay 文件")
+        target.unlink()
+
     def save(self, replay_hex: str) -> SavedReplay:
         replay_hex = validate_replay_hex(replay_hex)
         digest = hashlib.sha256(bytes.fromhex(replay_hex)).hexdigest()[:12]
@@ -102,6 +114,7 @@ class ReplayManager:
         self.selected: Optional[Path] = None
         self.override_armed = False
         self.saved = 0
+        self.game_version: Optional[str] = None
         self._lock = threading.RLock()
         self._ready_event = threading.Event()
         self._startup_error: Optional[str] = None
@@ -135,6 +148,9 @@ class ReplayManager:
         data = payload.get("data")
 
         if event_type == "ready":
+            if isinstance(data, dict):
+                game_version = data.get("gameVersion")
+                self.game_version = str(game_version) if game_version else None
             self._ready_event.set()
             self.emit("ready", data)
             return
@@ -236,7 +252,7 @@ class ReplayManager:
                 if self._startup_error:
                     raise RuntimeError(self._startup_error)
                 self.attached = True
-            self.emit("attached", process.pid)
+            self.emit("attached", {"pid": process.pid, "game_version": self.game_version})
             return True
         except Exception as exc:
             self.emit("error", f"连接游戏失败：{exc}")
@@ -296,12 +312,22 @@ class ReplayApp:
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.store = ReplayStore(data_dir)
         self.manager = ReplayManager(self.store, lambda kind, data=None: self.events.put((kind, data)))
+        self.log_lines: list[str] = []
+        self.log_window = None
+        self.log_text = None
+        self.tutorial_window = None
 
         root = tk.Tk()
         self.root = root
         root.title(f"{APP_NAME} {APP_VERSION}")
-        root.geometry("960x760")
-        root.minsize(840, 680)
+        self.app_icon = None
+        try:
+            self.app_icon = tk.PhotoImage(file=resource_path("assets", "app-icon.png"))
+            root.iconphoto(True, self.app_icon)
+        except Exception:
+            pass
+        root.geometry("960x650")
+        root.minsize(840, 560)
         root.configure(bg=self.BG)
 
         style = ttk.Style(root)
@@ -335,6 +361,34 @@ class ReplayApp:
             relief="flat",
             font=("Microsoft YaHei UI", 9, "bold"),
             padding=(8, 8),
+        )
+        style.layout(
+            "Replay.Vertical.TScrollbar",
+            [
+                (
+                    "Vertical.Scrollbar.trough",
+                    {
+                        "sticky": "ns",
+                        "children": [
+                            ("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"}),
+                        ],
+                    },
+                )
+            ],
+        )
+        style.configure(
+            "Replay.Vertical.TScrollbar",
+            background="#C7CDD8",
+            troughcolor="#F1F3F4",
+            bordercolor="#F1F3F4",
+            lightcolor="#C7CDD8",
+            darkcolor="#C7CDD8",
+            gripcount=0,
+            width=10,
+        )
+        style.map(
+            "Replay.Vertical.TScrollbar",
+            background=[("active", "#9AA4B2"), ("pressed", "#7B8794")],
         )
 
         header = tk.Frame(
@@ -372,6 +426,11 @@ class ReplayApp:
             fg=self.MUTED,
             font=("Microsoft YaHei UI", 9),
         ).pack(anchor=tk.W, pady=(5, 0))
+        header_actions = tk.Frame(header, bg=self.CARD)
+        header_actions.pack(side=tk.RIGHT, padx=20, pady=16)
+        self._header_button(header_actions, "GitHub", self.open_github).pack(side=tk.RIGHT)
+        self._header_button(header_actions, "运行记录", self.show_log_window).pack(side=tk.RIGHT, padx=(0, 8))
+        self._header_button(header_actions, "教程", self.show_tutorial).pack(side=tk.RIGHT, padx=(0, 8))
 
         content = tk.Frame(root, bg=self.BG, padx=24, pady=18)
         content.pack(fill=tk.BOTH, expand=True)
@@ -419,21 +478,6 @@ class ReplayApp:
         )
         self.play_button.pack(side=tk.LEFT, padx=(10, 0))
 
-        guide_card = self._card(content)
-        guide_card.pack(fill=tk.X, pady=(14, 0))
-        tk.Label(
-            guide_card,
-            text="第一次使用？照着这 3 步做",
-            bg=self.CARD,
-            fg=self.TEXT,
-            font=("Microsoft YaHei UI", 11, "bold"),
-        ).pack(anchor=tk.W, padx=20, pady=(15, 8))
-        steps = tk.Frame(guide_card, bg=self.CARD)
-        steps.pack(fill=tk.X, padx=14, pady=(0, 15))
-        self._step(steps, "1", "连接游戏", "打开游戏，再点上方蓝色按钮。").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
-        self._step(steps, "2", "播放想保存的回放", "回到游戏，正常播放一条回放。").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
-        self._step(steps, "3", "保存完成", "看到“保存成功”，就完成了。").pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
-
         library_card = self._card(content)
         library_card.pack(fill=tk.BOTH, expand=True, pady=(14, 0))
         library_card.columnconfigure(0, weight=1)
@@ -461,7 +505,12 @@ class ReplayApp:
             selectmode="browse",
             style="Replay.Treeview",
         )
-        scrollbar = ttk.Scrollbar(tree_area, orient=tk.VERTICAL, command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(
+            tree_area,
+            orient=tk.VERTICAL,
+            command=self.tree.yview,
+            style="Replay.Vertical.TScrollbar",
+        )
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.heading("#0", text="文件名")
         self.tree.heading("time", text="保存时间")
@@ -473,12 +522,29 @@ class ReplayApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.bind("<<TreeviewSelect>>", lambda _event: self.update_action_states())
         self.tree.bind("<Double-1>", lambda _event: self.arm_selected())
+        self.tree.bind("<Button-3>", self.show_replay_menu)
+        self.tree.bind("<Delete>", lambda _event: self.delete_selected())
+        self.tree.bind("<MouseWheel>", self.scroll_replay_list)
+        self.replay_menu = tk.Menu(
+            root,
+            tearoff=False,
+            bg=self.CARD,
+            fg=self.TEXT,
+            activebackground="#E8F0FE",
+            activeforeground=self.BLUE,
+            relief=tk.FLAT,
+            borderwidth=1,
+            font=("Microsoft YaHei UI", 9),
+        )
+        self.replay_menu.add_command(label="下一条播放这条回放", command=self.arm_selected)
+        self.replay_menu.add_separator()
+        self.replay_menu.add_command(label="删除这条回放", command=self.delete_selected)
 
         tip = tk.Label(
             library_card,
             text=(
-                "播放本地文件：先选中一行并点击第 2 个按钮，再回到游戏播放任意一条可用回放。"
-                "程序只替换这一次播放，之后会自动恢复保存模式。"
+                "双击可准备播放；右键可选择“下一条播放”或“删除”。"
+                "准备播放后，回到游戏播放任意一条可用的官方回放即可。"
             ),
             bg="#F8FAFD",
             fg=self.MUTED,
@@ -489,33 +555,13 @@ class ReplayApp:
             pady=7,
             font=("Microsoft YaHei UI", 9),
         )
-        tip.grid(row=2, column=0, sticky="ew", padx=18, pady=(6, 5))
-
-        log_header = tk.Frame(library_card, bg=self.CARD)
-        log_header.grid(row=3, column=0, sticky="ew", padx=18)
-        tk.Label(
-            log_header,
-            text="运行记录（遇到问题时查看）",
-            bg=self.CARD,
-            fg=self.MUTED,
-            font=("Microsoft YaHei UI", 9, "bold"),
-        ).pack(side=tk.LEFT)
-        self.log = tk.Text(
-            library_card,
-            height=2,
-            state=tk.DISABLED,
-            bg="#F8FAFD",
-            fg="#3C4043",
-            relief=tk.FLAT,
-            padx=10,
-            pady=7,
-            font=("Cascadia Mono", 8),
-        )
-        self.log.grid(row=4, column=0, sticky="ew", padx=18, pady=(4, 10))
+        tip.grid(row=2, column=0, sticky="ew", padx=18, pady=(6, 10))
 
         root.protocol("WM_DELETE_WINDOW", self.close)
         self.refresh()
         self.update_action_states()
+        self.append_log(f"{APP_NAME} {APP_VERSION} 已启动")
+        self.append_log(f"回放目录：{self.store.directory}")
         root.after(150, self.poll_events)
 
     def _card(self, parent):
@@ -571,6 +617,26 @@ class ReplayApp:
         button.bind("<Leave>", lambda _event: button.configure(bg=self.CARD))
         return button
 
+    def _header_button(self, parent, text: str, command):
+        button = self.tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg="#F1F3F4",
+            fg=self.TEXT,
+            activebackground="#E8F0FE",
+            activeforeground=self.BLUE,
+            relief=self.tk.FLAT,
+            borderwidth=0,
+            padx=12,
+            pady=7,
+            cursor="hand2",
+            font=("Microsoft YaHei UI", 9, "bold"),
+        )
+        button.bind("<Enter>", lambda _event: button.configure(bg="#E8F0FE", fg=self.BLUE))
+        button.bind("<Leave>", lambda _event: button.configure(bg="#F1F3F4", fg=self.TEXT))
+        return button
+
     def _step(self, parent, number: str, title: str, detail: str):
         frame = self.tk.Frame(parent, bg="#F8FAFD", padx=12, pady=10)
         self.tk.Label(
@@ -603,18 +669,218 @@ class ReplayApp:
         ).pack(fill=self.tk.X, pady=(2, 0))
         return frame
 
+    def show_tutorial(self) -> None:
+        if self.tutorial_window is not None and self.tutorial_window.winfo_exists():
+            self.tutorial_window.lift()
+            self.tutorial_window.focus_force()
+            return
+
+        window = self.tk.Toplevel(self.root)
+        window.withdraw()
+        self.tutorial_window = window
+        window.title("使用教程")
+        window.minsize(640, 430)
+        window.configure(bg=self.BG)
+        window.transient(self.root)
+        window.protocol("WM_DELETE_WINDOW", self.close_tutorial)
+
+        body = self.tk.Frame(window, bg=self.BG, padx=24, pady=22)
+        body.pack(fill=self.tk.BOTH, expand=True)
+        self.tk.Label(
+            body,
+            text="三步开始自动保存回放",
+            bg=self.BG,
+            fg=self.TEXT,
+            font=("Microsoft YaHei UI", 17, "bold"),
+        ).pack(anchor=self.tk.W)
+        self.tk.Label(
+            body,
+            text="程序只保存你在游戏里实际播放过的回放，不需要修改游戏文件。",
+            bg=self.BG,
+            fg=self.MUTED,
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor=self.tk.W, pady=(5, 16))
+
+        steps = self.tk.Frame(body, bg=self.BG)
+        steps.pack(fill=self.tk.X)
+        self._step(steps, "1", "打开并连接游戏", "先启动 Master Duel，再点击主界面的蓝色连接按钮。").pack(
+            side=self.tk.LEFT, fill=self.tk.BOTH, expand=True, padx=(0, 6)
+        )
+        self._step(steps, "2", "正常播放一条回放", "回到游戏，打开你想保存的回放并开始播放。").pack(
+            side=self.tk.LEFT, fill=self.tk.BOTH, expand=True, padx=6
+        )
+        self._step(steps, "3", "等待保存成功", "程序检测到数据后会自动保存，并显示在回放列表中。").pack(
+            side=self.tk.LEFT, fill=self.tk.BOTH, expand=True, padx=(6, 0)
+        )
+
+        replay_card = self._card(body)
+        replay_card.pack(fill=self.tk.X, pady=(18, 0))
+        self.tk.Label(
+            replay_card,
+            text="怎样播放已保存的回放？",
+            bg=self.CARD,
+            fg=self.TEXT,
+            font=("Microsoft YaHei UI", 11, "bold"),
+        ).pack(anchor=self.tk.W, padx=18, pady=(15, 5))
+        self.tk.Label(
+            replay_card,
+            text=(
+                "在主界面选中一条回放，双击它或右键选择“下一条播放这条回放”。"
+                "随后回到游戏，播放任意一条当前可用的官方回放；程序只替换这一次播放。"
+            ),
+            bg=self.CARD,
+            fg=self.MUTED,
+            justify=self.tk.LEFT,
+            anchor=self.tk.W,
+            wraplength=620,
+            font=("Microsoft YaHei UI", 9),
+        ).pack(fill=self.tk.X, padx=18, pady=(0, 15))
+
+        self._button(body, "知道了", self.close_tutorial, primary=True).pack(anchor=self.tk.E, pady=(16, 0))
+        self.show_centered_dialog(window, 720, 470)
+
+    def close_tutorial(self) -> None:
+        if self.tutorial_window is not None:
+            self.tutorial_window.destroy()
+            self.tutorial_window = None
+
+    def show_log_window(self) -> None:
+        if self.log_window is not None and self.log_window.winfo_exists():
+            self.log_window.lift()
+            self.log_window.focus_force()
+            return
+
+        window = self.tk.Toplevel(self.root)
+        window.withdraw()
+        self.log_window = window
+        window.title("运行记录")
+        window.minsize(650, 400)
+        window.configure(bg=self.BG)
+        window.transient(self.root)
+        window.protocol("WM_DELETE_WINDOW", self.close_log_window)
+
+        body = self.tk.Frame(window, bg=self.BG, padx=22, pady=20)
+        body.pack(fill=self.tk.BOTH, expand=True)
+        self.tk.Label(
+            body,
+            text="运行记录",
+            bg=self.BG,
+            fg=self.TEXT,
+            font=("Microsoft YaHei UI", 16, "bold"),
+        ).pack(anchor=self.tk.W)
+        self.tk.Label(
+            body,
+            text="正常使用时不需要查看。提交 Issue 时，请先复制下面的内容。",
+            bg=self.BG,
+            fg=self.MUTED,
+            font=("Microsoft YaHei UI", 9),
+        ).pack(anchor=self.tk.W, pady=(4, 12))
+
+        log_area = self.tk.Frame(
+            body,
+            bg=self.CARD,
+            highlightbackground=self.BORDER,
+            highlightcolor=self.BORDER,
+            highlightthickness=1,
+        )
+        log_area.pack(fill=self.tk.BOTH, expand=True)
+        text = self.tk.Text(
+            log_area,
+            state=self.tk.NORMAL,
+            bg=self.CARD,
+            fg="#3C4043",
+            insertbackground=self.TEXT,
+            relief=self.tk.FLAT,
+            borderwidth=0,
+            padx=12,
+            pady=10,
+            wrap=self.tk.WORD,
+            font=("Cascadia Mono", 9),
+        )
+        log_scrollbar = self.ttk.Scrollbar(
+            log_area,
+            orient=self.tk.VERTICAL,
+            command=text.yview,
+            style="Replay.Vertical.TScrollbar",
+        )
+        text.configure(yscrollcommand=log_scrollbar.set)
+        text.pack(side=self.tk.LEFT, fill=self.tk.BOTH, expand=True)
+        log_scrollbar.pack(side=self.tk.RIGHT, fill=self.tk.Y)
+        text.insert(self.tk.END, self.issue_report_text())
+        text.see(self.tk.END)
+        text.configure(state=self.tk.DISABLED)
+        self.log_text = text
+
+        actions = self.tk.Frame(body, bg=self.BG)
+        actions.pack(fill=self.tk.X, pady=(14, 0))
+        self._button(actions, "复制全部", self.copy_logs, primary=True).pack(side=self.tk.LEFT)
+        self._button(actions, "打开 GitHub Issues", self.open_issues).pack(side=self.tk.LEFT, padx=(10, 0))
+        self._link_button(actions, "关闭", self.close_log_window).pack(side=self.tk.RIGHT)
+        self.show_centered_dialog(window, 780, 500)
+
+    def show_centered_dialog(self, window, width: int, height: int) -> None:
+        self.root.update_idletasks()
+        window.update_idletasks()
+        screen_width = window.winfo_screenwidth()
+        screen_height = window.winfo_screenheight()
+        width = min(width, max(480, screen_width - 40))
+        height = min(height, max(360, screen_height - 80))
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - width) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - height) // 2
+        x = max(20, min(x, screen_width - width - 20))
+        y = max(20, min(y, screen_height - height - 40))
+        window.geometry(f"{width}x{height}+{x}+{y}")
+        window.deiconify()
+        window.lift()
+        window.focus_force()
+
+    def close_log_window(self) -> None:
+        if self.log_window is not None:
+            self.log_window.destroy()
+        self.log_window = None
+        self.log_text = None
+
+    def issue_report_text(self) -> str:
+        header = [
+            f"程序版本：{APP_VERSION}",
+            f"适配游戏版本：{SUPPORTED_GAME_VERSION}",
+            f"检测到的游戏版本：{self.manager.game_version or '尚未读取'}",
+            f"系统：{platform.platform()}",
+            f"Python：{platform.python_version()}",
+            f"回放目录：{self.store.directory}",
+            "",
+            "运行记录：",
+        ]
+        return "\n".join(header + self.log_lines) + "\n"
+
+    def copy_logs(self) -> None:
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.issue_report_text())
+        self.root.update_idletasks()
+        self.append_log("已将运行记录复制到剪贴板")
+
+    def open_github(self) -> None:
+        webbrowser.open(GITHUB_URL)
+
+    def open_issues(self) -> None:
+        webbrowser.open(GITHUB_ISSUES_URL)
+
     def set_status(self, title: str, detail: str, color: str) -> None:
         self.status_title.set(title)
         self.status_detail.set(detail)
         self.status_dot.configure(fg=color)
 
     def append_log(self, text: str) -> None:
-        self.log.configure(state=self.tk.NORMAL)
-        self.log.insert(self.tk.END, f"[{time.strftime('%H:%M:%S')}] {text}\n")
-        if int(self.log.index("end-1c").split(".")[0]) > 200:
-            self.log.delete("1.0", "50.0")
-        self.log.see(self.tk.END)
-        self.log.configure(state=self.tk.DISABLED)
+        line = f"[{time.strftime('%H:%M:%S')}] {text}"
+        self.log_lines.append(line)
+        if len(self.log_lines) > 500:
+            self.log_lines = self.log_lines[-450:]
+        if self.log_text is not None and self.log_text.winfo_exists():
+            self.log_text.configure(state=self.tk.NORMAL)
+            self.log_text.delete("1.0", self.tk.END)
+            self.log_text.insert(self.tk.END, self.issue_report_text())
+            self.log_text.see(self.tk.END)
+            self.log_text.configure(state=self.tk.DISABLED)
 
     def update_action_states(self) -> None:
         has_selection = self.selected_path() is not None
@@ -632,6 +898,23 @@ class ReplayApp:
         selected = self.tree.selection()
         return Path(selected[0]) if selected else None
 
+    def show_replay_menu(self, event) -> str:
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return "break"
+        self.tree.selection_set(row)
+        self.tree.focus(row)
+        self.update_action_states()
+        try:
+            self.replay_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.replay_menu.grab_release()
+        return "break"
+
+    def scroll_replay_list(self, event) -> str:
+        self.tree.yview_scroll(int(-event.delta / 120), "units")
+        return "break"
+
     def arm_selected(self) -> None:
         path = self.selected_path()
         if path is None:
@@ -645,6 +928,35 @@ class ReplayApp:
         except Exception as exc:
             self.set_status("准备本地回放失败", str(exc), self.RED)
             self.append_log(str(exc))
+
+    def delete_selected(self) -> None:
+        from tkinter import messagebox
+
+        path = self.selected_path()
+        if path is None:
+            self.set_status("还没有选择文件", "请先在列表中选择要删除的回放。", self.AMBER)
+            return
+        confirmed = messagebox.askyesno(
+            "删除回放",
+            f"确定要永久删除这条回放吗？\n\n{path.name}",
+            parent=self.root,
+            icon="warning",
+        )
+        if not confirmed:
+            return
+        try:
+            if self.manager.override_armed and self.manager.selected == path:
+                self.manager.cancel_override()
+            self.store.delete(path)
+            self.set_status("回放已删除", f"{path.name} 已从本地删除。", self.GREEN)
+            self.append_log(f"已删除 {path.name}")
+            self.refresh()
+        except FileNotFoundError:
+            self.set_status("文件已经不存在", "列表已自动刷新。", self.AMBER)
+            self.refresh()
+        except Exception as exc:
+            self.set_status("删除失败", str(exc), self.RED)
+            self.append_log(f"删除失败：{exc}")
 
     def refresh(self) -> None:
         selected = self.selected_path() if hasattr(self, "tree") else None
@@ -676,12 +988,31 @@ class ReplayApp:
             while True:
                 kind, data = self.events.get_nowait()
                 if kind == "attached":
-                    self.set_status("连接成功，自动保存已开启", "现在去游戏里播放回放；播放过的内容会自动出现在下方。", self.GREEN)
+                    details = data if isinstance(data, dict) else {"pid": data, "game_version": None}
+                    pid = details.get("pid")
+                    game_version = details.get("game_version")
+                    if game_version and game_version != SUPPORTED_GAME_VERSION:
+                        self.set_status(
+                            "游戏版本可能不兼容",
+                            f"检测到 Master Duel {game_version}，本程序适配 {SUPPORTED_GAME_VERSION}。请前往 GitHub 获取新版。",
+                            self.RED,
+                        )
+                        self.append_log(
+                            f"版本不匹配：游戏 {game_version}，程序适配 {SUPPORTED_GAME_VERSION}"
+                        )
+                    else:
+                        version_detail = f"已确认游戏版本 {game_version}。" if game_version else ""
+                        self.set_status(
+                            "连接成功，自动保存已开启",
+                            f"{version_detail}现在去游戏里播放回放；播放过的内容会自动出现在下方。",
+                            self.GREEN,
+                        )
                     self.attach_button.configure(state=self.tk.NORMAL, text="已连接 · 自动保存运行中")
-                    self.append_log(f"已连接 Master Duel（PID {data}）")
+                    self.append_log(f"已连接 Master Duel（PID {pid}，游戏版本 {game_version or '未读取'}）")
                 elif kind == "ready":
                     version = data.get("version", APP_VERSION) if isinstance(data, dict) else APP_VERSION
-                    self.append_log(f"回放组件已就绪（{version}）")
+                    game_version = data.get("gameVersion") if isinstance(data, dict) else None
+                    self.append_log(f"回放组件已就绪（{version}，游戏版本 {game_version or '未读取'}）")
                 elif kind == "waiting":
                     self.set_status("没有找到 Master Duel", "请先启动游戏并进入主界面，然后重新点击连接。", self.AMBER)
                     self.attach_button.configure(state=self.tk.NORMAL, text="1. 重新连接游戏")

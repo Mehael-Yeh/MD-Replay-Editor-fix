@@ -50,7 +50,9 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean --onefile --windowed `
             --name MD-Replay-Editor-fix `
+            --icon "assets/app-icon.ico" `
             --add-data "agent/_.js;agent" `
+            --add-data "assets/app-icon.png;assets" `
             --collect-all frida `
             main.py
           if (-not (Test-Path dist\MD-Replay-Editor-fix.exe)) { throw "EXE was not created" }

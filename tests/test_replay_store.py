@@ -41,6 +41,20 @@ class ReplayStoreTests(unittest.TestCase):
             os.utime(new, (200, 200))
             self.assertEqual(store.list()[-1].name, "old.replay")
 
+    def test_delete_only_allows_replays_inside_store(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = ReplayStore(root / "replays")
+            replay = store.save(VALID).path
+            store.delete(replay)
+            self.assertFalse(replay.exists())
+
+            outside = root / "outside.replay"
+            outside.write_text(VALID, encoding="ascii")
+            with self.assertRaises(ValueError):
+                store.delete(outside)
+            self.assertTrue(outside.exists())
+
 
 class FakeScript:
     def __init__(self):
@@ -51,6 +65,22 @@ class FakeScript:
 
 
 class ReplayManagerTests(unittest.TestCase):
+    def test_ready_message_records_game_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = ReplayManager(ReplayStore(Path(tmp)))
+            manager._on_message(
+                {
+                    "type": "send",
+                    "payload": {
+                        "type": "ready",
+                        "data": {"version": "v2.7.0_R2", "gameVersion": "2.7.0"},
+                    },
+                },
+                None,
+            )
+            self.assertTrue(manager._ready_event.is_set())
+            self.assertEqual(manager.game_version, "2.7.0")
+
     def test_fatal_agent_message_unblocks_startup(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = ReplayManager(ReplayStore(Path(tmp)))
