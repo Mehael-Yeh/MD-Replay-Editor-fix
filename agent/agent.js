@@ -9,11 +9,6 @@ function log(m) { console.log('[MD] ' + m); }
 
 function readCStr(p) { return p.isNull() ? '' : p.readCString(); }
 
-function tryExport(name) {
-    var p = Module.findExportByName('GameAssembly.dll', name);
-    if (p.isNull()) log('Export not found: ' + name);
-    return p;
-}
 
 function initApi() {
     var defs = {
@@ -46,7 +41,7 @@ function initApi() {
     for (var k in defs) {
         var d = defs[k];
         var p = Module.findExportByName('GameAssembly.dll', d[0]);
-        if (p.isNull()) {
+        if (!p) {
             log('MISSING EXPORT: ' + d[0]);
             api[k] = null;
         } else {
@@ -56,7 +51,7 @@ function initApi() {
 
     // il2cpp_method_get_pointer may not exist; fallback: read from struct
     var methodGetPtr = Module.findExportByName('GameAssembly.dll', 'il2cpp_method_get_pointer');
-    if (!methodGetPtr.isNull()) {
+    if (methodGetPtr) {
         api.methodGetPtr = new NativeFunction(methodGetPtr, 'pointer', ['pointer']);
     } else {
         log('il2cpp_method_get_pointer not found, using struct fallback');
