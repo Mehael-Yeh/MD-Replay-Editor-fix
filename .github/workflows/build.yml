@@ -21,18 +21,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build Frida agent (TypeScript)
+        shell: pwsh
+        run: |
+          cd agent
+          npm install 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+          npm run build 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "npm run build failed" }
+          if (-not (Test-Path _.js)) { throw "_.js was NOT created!" }
+          Write-Host "✅ _.js created: $((Get-Item _.js).Length / 1KB) KB"
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Python deps
         run: pip install frida-tools pyinstaller
 
       - name: Package exe
         run: |
           pyinstaller --onefile --name "MD-Replay-Editor-fix" --add-data "agent;agent" main.py
-          echo "=== Output ==="
           dir dist\*.exe
 
       - name: Upload artifact
@@ -50,11 +65,5 @@ jobs:
           body: |
             ## MD-Replay-Editor-fix
 
-            **开箱即用**：下载 exe，启动 Master Duel，运行即可。
-
-            ### 使用
-            1. 启动 Master Duel
-            2. 运行 `MD-Replay-Editor-fix.exe`
-            3. 点击 Attach
-            4. 正常打牌，录像自动保存
+            下载 exe，启动 Master Duel，运行，点 Attach 即可。
           files: dist\MD-Replay-Editor-fix.exe
