@@ -16,7 +16,7 @@ function clientWorkGet(path: string): string | null {
         const cw = requireClass("ClientWork", "YgomSystem.Utility");
         const getter = cw.methods["getByJsonPath"];
         if (!getter) return null;
-        const result = getter.invoke(Il2Cpp.string(path)) as Il2Cpp.Object;
+        const result = getter.invoke(Il2Cpp.String(path)) as Il2Cpp.Object;
         if (!result || result.isNull) return null;
         const mj = Il2Cpp.Domain.assemblies["Assembly-CSharp-firstpass"].image.classes["Json"];
         const ser = mj?.methods["Serialize"];
@@ -34,7 +34,7 @@ function clientWorkSet(path: string, json: string) {
         const cw = requireClass("ClientWork", "YgomSystem.Utility");
         const updater = cw.methods["updateJson"];
         if (!updater) return;
-        updater.invoke(Il2Cpp.string(path), Il2Cpp.string(json));
+        updater.invoke(Il2Cpp.String(path), Il2Cpp.String(json));
     } catch (e) {
         log(`ClientWork set error: ${e}`);
     }
