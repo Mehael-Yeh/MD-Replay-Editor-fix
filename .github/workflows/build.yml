@@ -43,7 +43,7 @@ jobs:
 
       - name: Package exe
         run: |
-          pyinstaller --onefile --name "MD-Replay-Editor-fix" main.py
+          pyinstaller --onefile --name "MD-Replay-Editor-fix" --add-data "agent;agent" main.py
           echo "=== Output ==="
           dir dist\*.exe
 

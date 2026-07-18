@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 import os, sys, json, time, threading
 from pathlib import Path
-REPLAY_DIR = Path(__file__).parent / "replays"
-AGENT_JS = Path(__file__).parent / "agent" / "_.js"
+
+if getattr(sys, "frozen", False):
+    BASE = Path(sys._MEIPASS)
+else:
+    BASE = Path(__file__).parent
+
+REPLAY_DIR = BASE / "replays"
+AGENT_JS = BASE / "agent" / "_.js"
 
 class ReplayManager:
     def __init__(self):
