@@ -1,0 +1,72 @@
+name: Build
+
+on:
+  push:
+    branches: [ master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version'
+        default: 'v1.0.0'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Build Frida agent
+        shell: cmd
+        run: |
+          cd agent
+          npm install
+          npm run build
+          dir _.js
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python deps
+        run: pip install frida-tools pyinstaller
+
+      - name: Package exe
+        run: |
+          pyinstaller --onefile --name "MD-Replay-Editor-fix" main.py
+          echo "=== Output ==="
+          dir dist\*.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MD-Replay-Editor-fix
+          path: dist\MD-Replay-Editor-fix.exe
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+          name: MD-Replay-Editor-fix ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
+          body: |
+            ## MD-Replay-Editor-fix
+
+            **开箱即用**：下载 exe，启动 Master Duel，运行即可。
+
+            ### 包含
+            - `MD-Replay-Editor-fix.exe` — 单文件可执行程序
+            - 注入后自动保存录像，突破官方上限
+
+            ### 使用
+            1. 启动 Master Duel
+            2. 运行 `MD-Replay-Editor-fix.exe`
+            3. 点击 Attach
+            4. 正常打牌，录像自动保存
+          files: dist\MD-Replay-Editor-fix.exe

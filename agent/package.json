@@ -1,0 +1,15 @@
+{
+  "name": "md-replay-agent",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "frida-compile index.ts -o _.js",
+    "watch": "frida-compile index.ts -o _.js -w"
+  },
+  "devDependencies": {
+    "@types/frida-gum": "^17.1.1",
+    "@types/node": "^18.0.0",
+    "frida-compile": "^10.2.5",
+    "frida-il2cpp-bridge": "^0.6.7"
+  }
+}
