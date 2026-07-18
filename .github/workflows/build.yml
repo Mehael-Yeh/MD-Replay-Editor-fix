@@ -4,6 +4,7 @@ permissions:
   contents: write
   actions: read
   checks: read
+
 on:
   push:
     branches: [ master ]
@@ -20,25 +21,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
-
-      - name: Build Frida agent
-        shell: cmd
-        run: |
-          cd agent
-          npm install
-          npm run build
-          dir _.js
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install Python deps
+      - name: Install dependencies
         run: pip install frida-tools pyinstaller
 
       - name: Package exe
@@ -63,10 +51,6 @@ jobs:
             ## MD-Replay-Editor-fix
 
             **开箱即用**：下载 exe，启动 Master Duel，运行即可。
-
-            ### 包含
-            - `MD-Replay-Editor-fix.exe` — 单文件可执行程序
-            - 注入后自动保存录像，突破官方上限
 
             ### 使用
             1. 启动 Master Duel

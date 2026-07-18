@@ -8,7 +8,7 @@ else:
     BASE = Path(__file__).parent
 
 REPLAY_DIR = BASE / "replays"
-AGENT_JS = BASE / "agent" / "_.js"
+AGENT_JS = BASE / "agent" / "agent.js"
 
 class ReplayManager:
     def __init__(self):
