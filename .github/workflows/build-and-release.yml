@@ -37,7 +37,8 @@ jobs:
         shell: pwsh
         run: |
           $tag = "v6.0.0-pre.2"
-          $beZip = "BepInEx-Unity.IL2CPP-win-x64-$tag.zip"
+          $ver = $tag -replace "^v", ""
+          $beZip = "BepInEx-Unity.IL2CPP-win-x64-$ver.zip"
           $dlUrl = "https://github.com/BepInEx/BepInEx/releases/download/$tag/$beZip"
           Write-Host "Downloading: $dlUrl"
           Invoke-WebRequest $dlUrl -OutFile "$env:TEMP\$beZip" -UseBasicParsing
