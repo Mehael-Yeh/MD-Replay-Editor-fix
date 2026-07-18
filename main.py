@@ -51,7 +51,7 @@ class ReplayManager:
                 print("ERROR: Master Duel not running"); return False
             print(f"Attached to PID {pid}")
             self.session = dev.attach(pid)
-            self.script = self.session.create_script(AGENT_JS.read_text())
+            self.script = self.session.create_script(AGENT_JS.read_text(encoding="utf-8"))
             self.script.on("message", self._on_msg)
             self.script.load()
             return True
