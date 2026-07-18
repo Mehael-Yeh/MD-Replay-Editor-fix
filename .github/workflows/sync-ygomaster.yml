@@ -1,0 +1,160 @@
+name: Sync YgoMaster compatibility data
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-ygomaster
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Read upstream compatibility data
+        id: sync
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/sync_ygomaster.py \
+            --output upstream/ygomaster.json \
+            --update-supported-version
+
+      - name: Report an incompatible upstream change
+        if: steps.sync.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > /tmp/failure-body.md <<EOF
+          The automated YgoMaster compatibility check could not parse or validate an upstream file.
+          This usually means a version field, replay marker, or relevant implementation moved.
+
+          - Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          Manual comparison is required. Do not update the supported Master Duel version until
+          connection, replay capture, and one-shot local playback have been tested.
+          EOF
+          issue_number="$(gh issue list --state open \
+            --search '"YgoMaster compatibility check failed" in:title' \
+            --json number --jq '.[0].number // empty')"
+          if [ -n "$issue_number" ]; then
+            gh issue comment "$issue_number" --body-file /tmp/failure-body.md
+          else
+            gh issue create \
+              --title "YgoMaster compatibility check failed" \
+              --body-file /tmp/failure-body.md
+          fi
+
+      - name: Stop after an incompatible upstream change
+        if: steps.sync.outcome == 'failure'
+        run: exit 1
+
+      - name: Run Python tests
+        if: steps.sync.outputs.changed == 'true'
+        run: python -m unittest discover -s tests -v
+
+      - uses: actions/setup-node@v4
+        if: steps.sync.outputs.changed == 'true'
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - name: Compile Frida agent
+        if: steps.sync.outputs.changed == 'true'
+        working-directory: agent
+        run: |
+          npm ci
+          npm run build
+          npx tsc --noEmit
+
+      - name: Publish compatibility candidate
+        if: steps.sync.outputs.changed == 'true'
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.sync.outputs.supported_version }}
+          UNITY_VERSION: ${{ steps.sync.outputs.unity_version }}
+          BRANCH: automation/ygomaster-sync
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add upstream/ygomaster.json main.py
+          git commit -m "Sync YgoMaster compatibility data for Master Duel $VERSION"
+          git push --force origin "HEAD:refs/heads/$BRANCH"
+
+          cat > /tmp/sync-body.md <<EOF
+          YgoMaster reports a compatibility-relevant update.
+
+          - Master Duel version: \`$VERSION\`
+          - Unity version: \`$UNITY_VERSION\`
+          - Candidate branch: \`$BRANCH\`
+          - Workflow run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+
+          The synchronization checks upstream markers, compiles the Frida agent, and runs unit tests.
+          It cannot launch Master Duel on a GitHub runner. Before merging, verify a real connection,
+          replay capture, and one-shot local playback on the official client.
+          EOF
+
+          existing_pr="$(gh pr list --head "$BRANCH" --base master --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing_pr" ]; then
+            gh pr edit "$existing_pr" \
+              --title "Sync YgoMaster compatibility data for Master Duel $VERSION" \
+              --body-file /tmp/sync-body.md
+            echo "pr_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/pull/$existing_pr" >> "$GITHUB_OUTPUT"
+          else
+            set +e
+            pr_url="$(gh pr create \
+              --base master \
+              --head "$BRANCH" \
+              --title "Sync YgoMaster compatibility data for Master Duel $VERSION" \
+              --body-file /tmp/sync-body.md 2>/tmp/pr-error.txt)"
+            pr_status=$?
+            set -e
+            if [ "$pr_status" -eq 0 ]; then
+              echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+            else
+              echo "GitHub Actions could not create a PR; creating or updating an Issue instead."
+              cat /tmp/pr-error.txt
+              issue_number="$(gh issue list --state open \
+                --search '"YgoMaster compatibility update detected" in:title' \
+                --json number --jq '.[0].number // empty')"
+              if [ -n "$issue_number" ]; then
+                gh issue comment "$issue_number" --body-file /tmp/sync-body.md
+              else
+                gh issue create \
+                  --title "YgoMaster compatibility update detected" \
+                  --body-file /tmp/sync-body.md
+              fi
+            fi
+          fi
+
+      - name: Write workflow summary
+        run: |
+          {
+            echo "## YgoMaster compatibility sync"
+            echo
+            echo "- Changed: \`${{ steps.sync.outputs.changed }}\`"
+            echo "- Master Duel: \`${{ steps.sync.outputs.supported_version }}\`"
+            echo "- Unity: \`${{ steps.sync.outputs.unity_version }}\`"
+            if [ -n "${{ steps.publish.outputs.pr_url }}" ]; then
+              echo "- Pull request: ${{ steps.publish.outputs.pr_url }}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

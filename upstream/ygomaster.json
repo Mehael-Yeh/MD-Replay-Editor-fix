@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "repository": "pixeltris/YgoMaster",
+  "ref": "master",
+  "supported_game_version": "2.7.0",
+  "unity_player_version": "6000.0.61f1",
+  "updatediff_client_version": "2.7.0",
+  "files": {
+    "Docs/updatediff.cs": {
+      "git_blob_sha": "765f5022897987abb0ca106ab5a95e32b02de7b0",
+      "sha256": "15d23efabcafbb1b444ef3ad1618004004c7eab0a32be7e6fc6afa6460918840"
+    },
+    "YgoMaster/Data/ClientData/ClientSettings.json": {
+      "git_blob_sha": "a271ad84c9705c59f5a138be80bcd8855fe3d8dd",
+      "sha256": "fb3cb1b3b03a214b0840be1ab96439ff8edeec54a9da59f567ed67d5a15a733e"
+    },
+    "YgoMasterClient/ConsoleHelper.cs": {
+      "git_blob_sha": "09949975b3bdbc151df32f2827f36d71841d25ee",
+      "sha256": "edadc00de7476ec939f1d0131abbcfc4d970c6f71c9bb98a6a18d0202662e367"
+    },
+    "YgoMasterClient/DuelReplayUtils.cs": {
+      "git_blob_sha": "cea7f8bce83edb5c769e03ab1b65a3eb4aae5c1a",
+      "sha256": "0cc619c046baebbca5649495dafe33b54809996f21a00dcb333e762fd0b6c2ad"
+    },
+    "YgoMasterClient/Program.cs": {
+      "git_blob_sha": "23a348e4c60d5e30e16923f7b91e7151e62f091b",
+      "sha256": "d625dea044488255f7cd791fbeaad84347cc31c7cf5adcfb68806cf911d9dac8"
+    },
+    "YgoMasterServer/Acts/Act_Duel.cs": {
+      "git_blob_sha": "296de18120acd35f1ce87a2a5d0ae3e1b9966c0f",
+      "sha256": "5c2a7158518fc09c1b74fe29d48807d6e5e4592b36ab7b636ef1d4edfddb6513"
+    },
+    "YgoMasterServer/GameServer.cs": {
+      "git_blob_sha": "3df5c6f32d2876984a5f6779c07fe4c6c3cf1d8e",
+      "sha256": "a95f75bcbef1fed40a6c2f62820e0eff7807a7b55e0ca5b2b04824b45d66aad7"
+    }
+  }
+}
