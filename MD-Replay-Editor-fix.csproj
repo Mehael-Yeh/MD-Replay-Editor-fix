@@ -42,7 +42,7 @@
     <Reference Include="System.Xml" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="Microsoft.CSharp" />
-    <Reference Include="BepInEx" HintPath="$(BEPINEX_DIR)\BepInEx.dll" Private="False" />
+    <Reference Include="BepInEx.Core" HintPath="$(BEPINEX_DIR)\BepInEx.Core.dll" Private="False" />
     <Reference Include="BepInEx.Unity.IL2CPP" HintPath="$(BEPINEX_DIR)\BepInEx.Unity.IL2CPP.dll" Private="False" />
     <Reference Include="Il2CppInterop.Common" HintPath="$(BEPINEX_DIR)\Il2CppInterop.Common.dll" Private="False" />
     <Reference Include="Il2CppInterop.Runtime" HintPath="$(BEPINEX_DIR)\Il2CppInterop.Runtime.dll" Private="False" />

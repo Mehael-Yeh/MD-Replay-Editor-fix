@@ -22,9 +22,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # ============================================================
-      #  STEP 1: Install .NET Framework 4.8 SDK + detect MSBuild
-      # ============================================================
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
         with:
@@ -35,46 +32,31 @@ jobs:
         with:
           arch: x64
 
-      # ============================================================
-      #  STEP 2: Download BepInEx 6 IL2CPP reference assemblies
-      # ============================================================
+      # Download pinned BepInEx 6 IL2CPP (v6.0.0-pre.2)
       - name: Download BepInEx 6 IL2CPP
         shell: pwsh
         run: |
-          # Latest BepInEx 6 IL2CPP release
-          $repo = "BepInEx/BepInEx"
-          $releases = "https://api.github.com/repos/$repo/releases/latest"
-          $tag = (Invoke-WebRequest $releases | ConvertFrom-Json).tag_name
-          Write-Host "Latest BepInEx release: $tag"
-
-          $beZip = "BepInEx_il2cpp_x64_$tag.zip"
-          $dlUrl = "https://github.com/$repo/releases/download/$tag/$beZip"
+          $tag = "v6.0.0-pre.2"
+          $beZip = "BepInEx-Unity.IL2CPP-win-x64-$tag.zip"
+          $dlUrl = "https://github.com/BepInEx/BepInEx/releases/download/$tag/$beZip"
           Write-Host "Downloading: $dlUrl"
           Invoke-WebRequest $dlUrl -OutFile "$env:TEMP\$beZip" -UseBasicParsing
-
           Expand-Archive "$env:TEMP\$beZip" -DestinationPath "$env:TEMP\BepInEx" -Force
-          Write-Host "BepInEx extracted to $env:TEMP\BepInEx"
-          Get-ChildItem "$env:TEMP\BepInEx" -Recurse -Filter "*.dll" | Select-Object Name, FullName
+          Write-Host "BepInEx extracted. Core DLLs:"
+          Get-ChildItem "$env:TEMP\BepInEx\BepInEx\core" -Filter "*.dll" | Select-Object Name
 
-      # ============================================================
-      #  STEP 3: Build C# plugin with MSBuild
-      # ============================================================
+      # Build C# plugin
       - name: Build C# Plugin
         shell: cmd
         run: |
           set BEPINEX_DIR=%TEMP%\BepInEx\BepInEx\core
-          echo "BepInEx dir: %BEPINEX_DIR%"
-          dir "%BEPINEX_DIR%\BepInEx.dll" 2>nul || dir "%BEPINEX_DIR%" /s /b *.dll 2>nul
-          
+          dir "%BEPINEX_DIR%\BepInEx.Core.dll" 2>nul
           msbuild MD-Replay-Editor-fix.csproj /p:Configuration=Release /p:BEPINEX_DIR="%BEPINEX_DIR%" /p:Platform=x64 /t:Rebuild /v:m
-          
           if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
           echo "=== Build output ==="
           dir bin\Release\*.dll
 
-      # ============================================================
-      #  STEP 4: Build C++ YgoMasterLoader
-      # ============================================================
+      # Build C++ loader
       - name: Build YgoMasterLoader (C++)
         shell: cmd
         run: |
@@ -84,27 +66,20 @@ jobs:
           echo "=== Loader output ==="
           dir bin\Release\YgoMasterLoader.dll
 
-      # ============================================================
-      #  STEP 5: Package release artifacts
-      # ============================================================
+      # Package release ZIP
       - name: Package build artifacts
         shell: pwsh
         run: |
           $releaseDir = "MD-Replay-Editor-fix"
           New-Item -ItemType Directory -Force -Path $releaseDir
-
           Copy-Item "bin\Release\MD-Replay-Editor-fix.dll" -Destination "$releaseDir\" -ErrorAction SilentlyContinue
           Copy-Item "bin\Release\YgoMasterLoader.dll" -Destination "$releaseDir\" -ErrorAction SilentlyContinue
           Copy-Item "README.md" -Destination "$releaseDir\"
           Copy-Item "LICENSE" -Destination "$releaseDir\" -ErrorAction SilentlyContinue
-          
-          # Verify
           Write-Host "=== Package contents ==="
           Get-ChildItem $releaseDir -Recurse | Select-Object Name, Length
-
-          # Compress
           Compress-Archive -Path "$releaseDir\*" -DestinationPath "MD-Replay-Editor-fix.zip" -Force
-          Write-Host "Package created: MD-Replay-Editor-fix.zip ($((Get-Item 'MD-Replay-Editor-fix.zip').Length / 1KB) KB)"
+          Write-Host "ZIP created: $((Get-Item 'MD-Replay-Editor-fix.zip').Length / 1KB) KB"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -115,12 +90,9 @@ jobs:
             MD-Replay-Editor-fix.zip
           if-no-files-found: warn
 
-      # ============================================================
-      #  STEP 6: Create GitHub Release (only on tags or manual dispatch)
-      # ============================================================
+      # Create GitHub Release
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.version || github.ref_name }}
