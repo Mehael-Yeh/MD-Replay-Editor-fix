@@ -5,7 +5,6 @@ permissions:
 
 on:
   push:
-    branches: [master]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -76,6 +75,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.version }}
-          name: MD-Replay-Editor-fix ${{ github.event.inputs.version }}
+          name: ${{ github.event.inputs.version }}
           generate_release_notes: true
           files: dist/MD-Replay-Editor-fix.exe
