@@ -23,7 +23,7 @@ class YgoMasterSyncTests(unittest.TestCase):
         self.assertEqual(parse_updatediff_version("// Client version 2.8.0\nclass A {}"), "2.8.0")
 
     def test_replace_supported_version_is_idempotent(self):
-        source = 'APP_VERSION = "v2.7.0_R3"\nSUPPORTED_GAME_VERSION = "2.7.0"\n'
+        source = 'APP_VERSION = "v2.7.0_R4"\nSUPPORTED_GAME_VERSION = "2.7.0"\n'
         updated, changed = replace_supported_game_version(source, "2.8.0")
         self.assertTrue(changed)
         self.assertIn('SUPPORTED_GAME_VERSION = "2.8.0"', updated)

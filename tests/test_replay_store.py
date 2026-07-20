@@ -93,7 +93,7 @@ class ReplayManagerTests(unittest.TestCase):
                     "type": "send",
                     "payload": {
                         "type": "ready",
-                        "data": {"version": "v2.7.0_R3", "gameVersion": "2.7.0"},
+                        "data": {"version": "v2.7.0_R4", "gameVersion": "2.7.0"},
                     },
                 },
                 None,

@@ -1,7 +1,7 @@
 import "frida-il2cpp-bridge";
 
 const REPLAY_MARKER_HEX = "7265706c61796d"; // ASCII: replaym
-const AGENT_VERSION = "v2.7.0_R3";
+const AGENT_VERSION = "v2.7.0_R4";
 
 function emit(type: string, data: unknown = null): void {
     send({ type, data });
@@ -38,7 +38,10 @@ function readGameVersion(game: Il2Cpp.Image): string | null {
         const value = getter.invoke() as Il2Cpp.String;
         return value?.content ?? null;
     } catch (error) {
-        emit("log", `无法读取游戏版本：${error}`);
+        emit("log", {
+            message: "agent.game_version_read_failed",
+            error: String(error)
+        });
         return null;
     }
 }
@@ -80,7 +83,10 @@ Il2Cpp.perform(() => {
                 }
             }
         } catch (error) {
-            emit("log", `回放数据处理失败，使用游戏原响应：${error}`);
+            emit("log", {
+                message: "agent.replay_processing_failed",
+                error: String(error)
+            });
         }
         (this as Il2Cpp.Object)
             .method("DeserializeAsync", 2)
@@ -92,4 +98,7 @@ Il2Cpp.perform(() => {
         gameVersion,
         hook: "YgomSystem.Network.FormatYgom.DeserializeAsync"
     });
-}).catch(error => emit("fatal", `IL2CPP 初始化失败：${error}`));
+}).catch(error => emit("fatal", {
+    message: "agent.il2cpp_initialization_failed",
+    error: String(error)
+}));
