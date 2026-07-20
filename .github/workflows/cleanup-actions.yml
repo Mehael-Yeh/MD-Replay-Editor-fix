@@ -17,7 +17,7 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Keep only the five newest workflow runs
+      - name: Keep only the three newest workflow runs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -28,7 +28,7 @@ jobs:
               sort -r
           )
 
-          keep_count=5
+          keep_count=3
           deleted_count=0
           skipped_count=0
 
