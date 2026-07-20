@@ -22,9 +22,9 @@ The project also draws on [pixeltris/YgoMaster](https://github.com/pixeltris/Ygo
 
 1. Download `MD-Replay-Editor-fix.exe` from [Releases](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/releases).
 2. Start the Steam version of Master Duel and remain on the main screen.
-3. Run the EXE and click **连接游戏并开始自动保存** (Connect to the game and start auto-saving).
+3. Run the EXE and click **Connect to game and start auto-save**.
 4. Play the replay you want to save in-game. The program will automatically write it to the `replays` folder.
-5. To play a local replay, select the file and click **游戏内回放** (In-game replay), or right-click and select **下一条播放** (Play next). Then return to the game and play any currently available official replay. To cancel, click **取消回放** (Cancel replay).
+5. To play a local replay, select the file and click **Play in game**, or right-click and select **Play Next**. Then return to the game and play any currently available official replay. To cancel, click **Cancel Replay**.
 
 The local file replaces only the next replay response. After it is triggered, the program automatically returns to save mode. It does not permanently modify game files or server data.
 
