@@ -1,47 +1,49 @@
 # MD-Replay-Editor-fix
 
+[English](README.md) | [中文](README.zh-CN.md)
+
 [![Release](https://img.shields.io/github/v/release/Mehael-Yeh/MD-Replay-Editor-fix?label=Release)](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/Mehael-Yeh/MD-Replay-Editor-fix/total?label=Downloads)](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/releases)
 [![Build](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/actions/workflows/build.yml/badge.svg)](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/actions/workflows/build.yml)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D4)](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-一个开箱即用的《游戏王 Master Duel》本地回放保存与播放工具。
+An out-of-the-box tool for saving and playing local Yu-Gi-Oh! Master Duel replays.
 
-运行 EXE 并连接游戏后，程序会自动保存游戏中实际播放过的回放。之后可以选择已保存文件，借用任意一条当前可播放的官方回放作为入口，在游戏内播放本地回放。
+After you run the EXE and connect it to the game, the program automatically saves any replay you actually play in-game. You can then select a saved file and use any currently playable official replay as an entry point to play the local replay in-game.
 
-## 项目来源
+## Project Background
 
-本项目复活并继续维护 [crazydoomy/MD-Replay-Editor](https://github.com/crazydoomy/MD-Replay-Editor)，保留其 Frida 回放响应抓取与替换思路，并重写了版本兼容、文件管理、状态处理和图形界面。
+This project revives and continues the maintenance of [crazydoomy/MD-Replay-Editor](https://github.com/crazydoomy/MD-Replay-Editor). It retains the original approach of capturing and replacing replay responses with Frida, while rewriting version compatibility, file management, state handling, and the graphical interface.
 
-项目同时参考了 [pixeltris/YgoMaster](https://github.com/pixeltris/YgoMaster) 的 Master Duel 网络流程、`ClientWork` 数据结构和本地回放管理设计。
+The project also draws on [pixeltris/YgoMaster](https://github.com/pixeltris/YgoMaster) for its understanding of Master Duel's network flow, the `ClientWork` data structure, and local replay management design.
 
-## 使用方法
+## Usage
 
-1. 从 [Releases](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/releases) 下载 `MD-Replay-Editor-fix.exe`。
-2. 启动 Steam 版 Master Duel，并停留在主界面。
-3. 运行 EXE，点击 **连接游戏并开始自动保存**。
-4. 在游戏中播放想保存的回放，程序会自动写入 `replays` 文件夹。
-5. 播放本地回放时，选中文件后点击 **游戏内回放**，或者右键选择 **下一条播放**；然后回到游戏播放任意一条当前可用的官方回放。需要撤销时，点击 **取消回放**。
+1. Download `MD-Replay-Editor-fix.exe` from [Releases](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/releases).
+2. Start the Steam version of Master Duel and remain on the main screen.
+3. Run the EXE and click **连接游戏并开始自动保存** (Connect to the game and start auto-saving).
+4. Play the replay you want to save in-game. The program will automatically write it to the `replays` folder.
+5. To play a local replay, select the file and click **游戏内回放** (In-game replay), or right-click and select **下一条播放** (Play next). Then return to the game and play any currently available official replay. To cancel, click **取消回放** (Cancel replay).
 
-本地文件只替换下一次回放响应，触发后会自动恢复保存模式，不会永久修改游戏文件或服务器数据。
+The local file replaces only the next replay response. After it is triggered, the program automatically returns to save mode. It does not permanently modify game files or server data.
 
-## 主要功能
+## Features
 
-- 单 EXE 图形界面，无需安装 Python、Node.js 或 Frida。
-- 自动保存游戏中实际播放过的完整回放。
-- 在游戏内播放已保存的本地回放。
-- 重命名和删除本地回放文件。
+- Single-EXE graphical interface with no need to install Python, Node.js, or Frida.
+- Automatically saves complete replays that are actually played in-game.
+- Plays saved local replays in-game.
+- Renames and deletes local replay files.
 
-## 工作原理
+## How It Works
 
-程序通过 Frida 注入 `masterduel.exe`，Hook IL2CPP 方法 `YgomSystem.Network.FormatYgom.DeserializeAsync`。
+The program injects into `masterduel.exe` through Frida and hooks the IL2CPP method `YgomSystem.Network.FormatYgom.DeserializeAsync`.
 
-- 收到包含 `replaym` 数据段的回放响应时，程序将完整原始字节保存为 `.replay` 文件。
-- 播放本地文件时，仅将下一次官方回放响应替换为所选文件。
-- 处理失败时自动使用游戏原始响应，避免回放加载线程卡住。
+- When a replay response containing a `replaym` data section is received, the program saves the complete raw bytes as a `.replay` file.
+- When playing a local file, only the next official replay response is replaced with the selected file.
+- If processing fails, the original game response is used automatically to prevent the replay loading thread from hanging.
 
-## 从源码运行
+## Running from Source
 
 ```powershell
 cd agent
@@ -53,13 +55,13 @@ py -m pip install -r requirements.txt
 py main.py
 ```
 
-运行测试：
+Run the tests:
 
 ```powershell
 py -m unittest discover -s tests -v
 ```
 
-构建单文件 EXE：
+Build a single-file EXE:
 
 ```powershell
 pyinstaller --noconfirm --clean --onefile --windowed `
@@ -71,14 +73,14 @@ pyinstaller --noconfirm --clean --onefile --windowed `
   main.py
 ```
 
-输出文件位于 `dist\MD-Replay-Editor-fix.exe`。
+The output file is located at `dist\MD-Replay-Editor-fix.exe`.
 
 
-## 致谢
+## Acknowledgments
 
-- [crazydoomy/MD-Replay-Editor](https://github.com/crazydoomy/MD-Replay-Editor) — 原始 Frida 回放抓取与替换思路
-- [pixeltris/YgoMaster](https://github.com/pixeltris/YgoMaster) — Master Duel 网络、`ClientWork` 与本地回放设计参考
+- [crazydoomy/MD-Replay-Editor](https://github.com/crazydoomy/MD-Replay-Editor) — Original concept for capturing and replacing replay responses with Frida
+- [pixeltris/YgoMaster](https://github.com/pixeltris/YgoMaster) — Reference for Master Duel networking, `ClientWork`, and local replay design
 
-## 许可证
+## License
 
-项目代码采用 [MIT License](LICENSE)。第三方组件及原项目的版权与许可信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+The project code is licensed under the [MIT License](LICENSE). Copyright and license information for third-party components and the original project can be found in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
