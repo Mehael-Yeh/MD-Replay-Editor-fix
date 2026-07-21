@@ -4,197 +4,44 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import os
 import platform
 import queue
-import re
 import subprocess
 import sys
 import threading
 import time
 import webbrowser
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
+
+from app_i18n import (
+    AGENT_MESSAGE_TEMPLATES,
+    DEFAULT_LANGUAGE,
+    ENGLISH_TRANSLATIONS,
+    LANGUAGE_NAMES,
+    load_language,
+    save_language,
+    settings_path,
+    translate,
+)
+from game_bridge import (
+    GAME_LAUNCH_TIMEOUT_SECONDS,
+    MASTER_DUEL_STEAM_URI,
+    ReplayManager,
+    find_master_duel_process,
+    launch_master_duel,
+    wait_for_master_duel_process,
+)
+from replay_store import ReplayStore, SavedReplay, validate_replay_hex
 
 
 APP_NAME = "MD-Replay-Editor-fix"
-APP_VERSION = "v2.7.0_R4"
+APP_VERSION = "v2.7.0_R5"
 SUPPORTED_GAME_VERSION = "2.7.0"
 GITHUB_URL = "https://github.com/Mehael-Yeh/MD-Replay-Editor-fix"
 GITHUB_ISSUES_URL = f"{GITHUB_URL}/issues/new"
-REPLAY_MARKER = b"replaym"
-HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
-READY_TIMEOUT_SECONDS = 20
-DEFAULT_LANGUAGE = "zh-CN"
-LANGUAGE_NAMES = {"zh-CN": "中文", "en": "English"}
-AGENT_MESSAGE_TEMPLATES = {
-    "agent.game_version_read_failed": "无法读取游戏版本：{error}",
-    "agent.replay_processing_failed": "回放数据处理失败，使用游戏原响应：{error}",
-    "agent.il2cpp_initialization_failed": "IL2CPP 初始化失败：{error}",
-}
-
-ENGLISH_TRANSLATIONS = {
-    "文件不是有效的十六进制回放数据": "The file does not contain valid hexadecimal replay data.",
-    "文件中未找到 Master Duel 回放标记": "The Master Duel replay marker was not found in the file.",
-    "只能管理回放保存目录中的 .replay 文件": "Only .replay files in the replay folder can be managed.",
-    "请输入新的回放名称": "Enter a new replay name.",
-    '名称不能包含以下字符：< > : " / \\ | ? *': 'The name cannot contain these characters: < > : " / \\ | ? *',
-    "名称不能以句点或空格结尾": "The name cannot end with a period or space.",
-    "这个名称由 Windows 系统保留，请换一个名称": "This name is reserved by Windows. Choose a different name.",
-    "已经存在名为“{name}”的回放": 'A replay named "{name}" already exists.',
-    "代理发生未知错误": "An unknown agent error occurred.",
-    "代理初始化失败": "Agent initialization failed.",
-    "无法读取游戏版本：{error}": "Failed to read the game version: {error}",
-    "回放数据处理失败，使用游戏原响应：{error}": "Replay processing failed; using the original game response: {error}",
-    "IL2CPP 初始化失败：{error}": "IL2CPP initialization failed: {error}",
-    "处理回放失败：{error}": "Failed to process replay: {error}",
-    "代理启动期间连接断开：{reason}": "The connection was lost while the agent was starting: {reason}",
-    "缺少 Frida 运行库，请使用 Release 中的完整 EXE": "The Frida runtime is missing. Use the complete EXE from Releases.",
-    "未找到已编译代理 agent/_.js": "The compiled agent agent/_.js was not found.",
-    "未检测到 Master Duel，请先启动游戏": "Master Duel was not detected. Start the game first.",
-    "代理在 {seconds} 秒内没有就绪": "The agent was not ready within {seconds} seconds.",
-    "连接游戏失败：{error}": "Failed to connect to the game: {error}",
-    "请先点击“连接游戏并开始自动保存”": 'Click "Connect to game and start auto-save" first.',
-    "Master Duel 回放助手": "Master Duel Replay Editor",
-    "自动保存看过的回放，也能把本地回放重新放进游戏播放": "Automatically save watched replays and play local replays in-game",
-    "运行记录": "Activity Log",
-    "教程": "Tutorial",
-    "语言": "Language",
-    "还没有连接游戏": "Not connected to the game",
-    "先打开 Master Duel，再点击下面的蓝色按钮。": "Open Master Duel first, then click the blue button below.",
-    "1. 连接游戏并开始自动保存": "1. Connect to game and start auto-save",
-    "2. 游戏内回放": "2. Play in game",
-    "已保存的回放": "Saved Replays",
-    "已保存的回放（{count}）": "Saved Replays ({count})",
-    "打开保存位置": "Open Folder",
-    "刷新列表": "Refresh",
-    "文件名": "File Name",
-    "保存时间": "Saved At",
-    "文件大小": "Size",
-    "下一条播放": "Play Next",
-    "重命名": "Rename",
-    "删除": "Delete",
-    "双击可准备播放；右键可选择“下一条播放”或“删除”。准备播放后，回到游戏播放任意一条可用的官方回放即可。": 'Double-click to prepare playback, or right-click and choose "Play Next" or "Delete." Then return to the game and play any available official replay.',
-    "{app} {version} 已启动": "{app} {version} started",
-    "回放目录：{directory}": "Replay folder: {directory}",
-    "使用教程": "Tutorial",
-    "三步开始自动保存回放": "Start Auto-Saving Replays in Three Steps",
-    "程序只保存你在游戏里实际播放过的回放，不需要修改游戏文件。": "The program only saves replays you actually play in-game and does not modify game files.",
-    "打开并连接游戏": "Open and Connect to the Game",
-    "先启动 Master Duel，再点击主界面的蓝色连接按钮。": "Start Master Duel, then click the blue connect button on the main screen.",
-    "正常播放一条回放": "Play a Replay Normally",
-    "回到游戏，打开你想保存的回放并开始播放。": "Return to the game, open the replay you want to save, and start playing it.",
-    "等待保存成功": "Wait for It to Save",
-    "程序检测到数据后会自动保存，并显示在回放列表中。": "The program saves detected replay data automatically and adds it to the replay list.",
-    "怎样播放已保存的回放？": "How Do I Play a Saved Replay?",
-    "在主界面选中一条回放，双击它或右键选择“下一条播放”。随后回到游戏，播放任意一条当前可用的官方回放；程序只替换这一次播放。如果临时不想播放，点击主界面的“取消回放”即可。": 'Select a replay on the main screen, then double-click it or right-click and choose "Play Next." Return to the game and play any currently available official replay; only that playback is replaced. Click "Cancel Replay" on the main screen if you change your mind.',
-    "知道了": "Got It",
-    "正常使用时不需要查看。提交 Issue 时，请先复制下面的内容。": "You normally do not need this. Copy the content below before submitting an issue.",
-    "复制全部": "Copy All",
-    "打开 GitHub Issues": "Open GitHub Issues",
-    "关闭": "Close",
-    "程序版本：{version}": "App version: {version}",
-    "适配游戏版本：{version}": "Supported game version: {version}",
-    "检测到的游戏版本：{version}": "Detected game version: {version}",
-    "尚未读取": "Not detected",
-    "系统：{system}": "System: {system}",
-    "Python：{version}": "Python: {version}",
-    "回放目录：{directory}": "Replay folder: {directory}",
-    "运行记录：": "Activity log:",
-    "已将运行记录复制到剪贴板": "Activity log copied to the clipboard",
-    "取消回放": "Cancel Replay",
-    "已经连接游戏": "Already Connected",
-    "自动保存正在运行，不需要重复点击。": "Auto-save is running; you do not need to connect again.",
-    "正在连接游戏…": "Connecting to the Game…",
-    "通常只需要几秒，请不要关闭游戏。": "This usually takes only a few seconds. Do not close the game.",
-    "正在连接，请稍候…": "Connecting, please wait…",
-    "还没有选择文件": "No File Selected",
-    "请先在下方列表中点选一条回放。": "Select a replay from the list below first.",
-    "请先连接游戏": "Connect to the Game First",
-    "点击第 1 个蓝色按钮，连接成功后再播放本地文件。": "Click the first blue button and wait for a successful connection before playing a local file.",
-    "准备本地回放失败": "Failed to Prepare Local Replay",
-    "请先在列表中选择要重命名的回放。": "Select the replay you want to rename first.",
-    "重命名回放": "Rename Replay",
-    "起一个容易辨认的名称，回放内容不会改变。": "Choose an easy-to-recognize name. The replay content will not change.",
-    "回放名称": "Replay Name",
-    "重命名成功": "Replay Renamed",
-    "新的名称是 {name}": "The new name is {name}",
-    "已将 {old} 重命名为 {new}": "Renamed {old} to {new}",
-    "文件已经不存在": "File No Longer Exists",
-    "列表已自动刷新。": "The list has been refreshed automatically.",
-    "取消": "Cancel",
-    "请先在列表中选择要删除的回放。": "Select the replay you want to delete first.",
-    "删除回放": "Delete Replay",
-    "确定要永久删除这条回放吗？\n\n{name}": "Permanently delete this replay?\n\n{name}",
-    "此操作无法撤销。删除后，这条回放将从本地永久移除。": "This action cannot be undone. The replay will be permanently removed from this device.",
-    "要删除的文件": "File to delete",
-    "回放已删除": "Replay Deleted",
-    "{name} 已从本地删除。": "{name} was deleted locally.",
-    "已删除 {name}": "Deleted {name}",
-    "删除失败": "Delete Failed",
-    "删除失败：{error}": "Delete failed: {error}",
-    "游戏版本可能不兼容": "Game Version May Be Incompatible",
-    "检测到 Master Duel {game}，本程序适配 {supported}。请前往 GitHub 获取新版。": "Master Duel {game} was detected, but this app supports {supported}. Visit GitHub for an update.",
-    "版本不匹配：游戏 {game}，程序适配 {supported}": "Version mismatch: game {game}, app supports {supported}",
-    "已确认游戏版本 {version}。": "Game version {version} confirmed. ",
-    "连接成功，自动保存已开启": "Connected; Auto-Save Is On",
-    "{version_detail}现在去游戏里播放回放；播放过的内容会自动出现在下方。": "{version_detail}Play replays in-game and they will appear below automatically.",
-    "已连接 · 自动保存运行中": "Connected · Auto-Save Running",
-    "未读取": "Not detected",
-    "已连接 Master Duel（PID {pid}，游戏版本 {version}）": "Connected to Master Duel (PID {pid}, game version {version})",
-    "回放组件已就绪（{version}，游戏版本 {game}）": "Replay component ready ({version}, game version {game})",
-    "没有找到 Master Duel": "Master Duel Not Found",
-    "请先启动游戏并进入主界面，然后重新点击连接。": "Start the game and reach the main screen, then click connect again.",
-    "1. 重新连接游戏": "1. Reconnect to Game",
-    "保存成功": "Replay Saved",
-    "{name} 已加入下方列表。": "{name} was added to the list below.",
-    "已保存 {name}": "Saved {name}",
-    "这条回放已经保存过": "Replay Already Saved",
-    "程序不会重复保存，因此不会浪费磁盘空间。": "Duplicate replays are skipped to avoid wasting disk space.",
-    "跳过重复文件 {name}": "Skipped duplicate file {name}",
-    "本地回放已经准备好": "Local Replay Ready",
-    "现在回到游戏，播放任意一条可用回放。": "Return to the game and play any available replay.",
-    "下一次播放将使用 {name}": "The next playback will use {name}",
-    "已取消回放": "Replay Cancelled",
-    "不会再替换下一条游戏回放，自动保存仍在运行。": "The next replay will not be replaced; auto-save is still running.",
-    "已取消准备好的本地回放": "Cancelled the prepared local replay",
-    "本地回放已送入游戏": "Local Replay Sent to Game",
-    "本次播放已替换；程序现在自动恢复保存模式。": "This playback was replaced; the program has returned to save mode.",
-    "已加载 {name}": "Loaded {name}",
-    "游戏连接已断开": "Game Disconnected",
-    "如果游戏仍在运行，请点击按钮重新连接。": "If the game is still running, click the button to reconnect.",
-    "连接断开：{detail}": "Disconnected: {detail}",
-    "连接或运行失败": "Connection or Runtime Failure",
-    "1. 重试连接": "1. Retry Connection",
-    "错误：{error}": "Error: {error}",
-}
-
-
-def translate(language: str, text: str, **values: object) -> str:
-    template = ENGLISH_TRANSLATIONS.get(text, text) if language == "en" else text
-    return template.format(**values)
-
-
-def settings_path(data_dir: Path) -> Path:
-    return data_dir.parent / "settings.json"
-
-
-def load_language(data_dir: Path) -> str:
-    try:
-        value = json.loads(settings_path(data_dir).read_text(encoding="utf-8")).get("language")
-        return value if value in LANGUAGE_NAMES else DEFAULT_LANGUAGE
-    except (OSError, ValueError, TypeError, AttributeError):
-        return DEFAULT_LANGUAGE
-
-
-def save_language(data_dir: Path, language: str) -> None:
-    path = settings_path(data_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"language": language}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def resource_path(*parts: str) -> Path:
@@ -216,303 +63,6 @@ def default_data_dir() -> Path:
         local = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_NAME / "replays"
         local.mkdir(parents=True, exist_ok=True)
         return local
-
-
-def validate_replay_hex(value: str, translator: Optional[Callable[..., str]] = None) -> str:
-    tr = translator or (lambda text, **values: text.format(**values))
-    value = "".join(value.split()).lower()
-    if not value or len(value) % 2 or not HEX_RE.fullmatch(value):
-        raise ValueError(tr("文件不是有效的十六进制回放数据"))
-    raw = bytes.fromhex(value)
-    if REPLAY_MARKER not in raw:
-        raise ValueError(tr("文件中未找到 Master Duel 回放标记"))
-    return value
-
-
-@dataclass(frozen=True)
-class SavedReplay:
-    path: Path
-    created: bool
-
-
-class ReplayStore:
-    def __init__(self, directory: Path, translator: Optional[Callable[..., str]] = None):
-        self.directory = directory
-        self.tr = translator or (lambda text, **values: text.format(**values))
-        self.directory.mkdir(parents=True, exist_ok=True)
-
-    def list(self) -> list[Path]:
-        return sorted(self.directory.glob("*.replay"), key=lambda p: p.stat().st_mtime, reverse=True)
-
-    def read(self, path: Path) -> str:
-        return validate_replay_hex(path.read_text(encoding="ascii"), self.tr)
-
-    def _checked_path(self, path: Path) -> Path:
-        directory = self.directory.resolve()
-        target = path.resolve()
-        if target.parent != directory or target.suffix.lower() != ".replay":
-            raise ValueError(self.tr("只能管理回放保存目录中的 .replay 文件"))
-        return target
-
-    def delete(self, path: Path) -> None:
-        self._checked_path(path).unlink()
-
-    def rename(self, path: Path, new_name: str) -> Path:
-        source = self._checked_path(path)
-        name = new_name.strip()
-        if name.lower().endswith(".replay"):
-            name = name[:-7].rstrip()
-        if not name:
-            raise ValueError(self.tr("请输入新的回放名称"))
-        if any(ord(char) < 32 or char in '<>:"/\\|?*' for char in name):
-            raise ValueError(self.tr('名称不能包含以下字符：< > : " / \\ | ? *'))
-        if name.endswith((".", " ")):
-            raise ValueError(self.tr("名称不能以句点或空格结尾"))
-        reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
-        if name.upper() in reserved:
-            raise ValueError(self.tr("这个名称由 Windows 系统保留，请换一个名称"))
-
-        target = self.directory / f"{name}.replay"
-        if target == source:
-            return source
-        if target.exists():
-            raise FileExistsError(self.tr("已经存在名为“{name}”的回放", name=target.name))
-        source.rename(target)
-        return target
-
-    def save(self, replay_hex: str) -> SavedReplay:
-        replay_hex = validate_replay_hex(replay_hex, self.tr)
-        digest = hashlib.sha256(bytes.fromhex(replay_hex)).hexdigest()[:12]
-        existing = next(self.directory.glob(f"*_{digest}.replay"), None)
-        if existing is None:
-            for candidate in self.directory.glob("*.replay"):
-                try:
-                    candidate_hex = self.read(candidate)
-                    candidate_digest = hashlib.sha256(bytes.fromhex(candidate_hex)).hexdigest()[:12]
-                    if candidate_digest == digest:
-                        existing = candidate
-                        break
-                except (OSError, ValueError):
-                    continue
-        if existing:
-            return SavedReplay(existing, False)
-
-        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        path = self.directory / f"{stamp}_{digest}.replay"
-        suffix = 2
-        while path.exists():
-            path = self.directory / f"{stamp}_{suffix}_{digest}.replay"
-            suffix += 1
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(replay_hex, encoding="ascii")
-        temporary.replace(path)
-        return SavedReplay(path, True)
-
-
-class ReplayManager:
-    def __init__(
-        self,
-        store: ReplayStore,
-        event_sink: Optional[Callable[[str, object], None]] = None,
-        translator: Optional[Callable[..., str]] = None,
-    ):
-        self.store = store
-        self.tr = translator or (lambda text, **values: text.format(**values))
-        self.event_sink = event_sink or (lambda _kind, _data: None)
-        self.session = None
-        self.script = None
-        self.attached = False
-        self.selected: Optional[Path] = None
-        self.override_armed = False
-        self.saved = 0
-        self.game_version: Optional[str] = None
-        self._lock = threading.RLock()
-        self._ready_event = threading.Event()
-        self._startup_error: Optional[str] = None
-
-    def emit(self, kind: str, data: object = None) -> None:
-        self.event_sink(kind, data)
-
-    def localize_agent_message(self, data: object, fallback: str) -> str:
-        if isinstance(data, dict):
-            template = AGENT_MESSAGE_TEMPLATES.get(str(data.get("message")))
-            if template:
-                return self.tr(template, error=data.get("error", ""))
-        return str(data or self.tr(fallback))
-
-    def _reply(self, replay_hex: str) -> None:
-        script = self.script
-        if script is not None:
-            script.post({"type": "replay_reply", "replay": replay_hex})
-
-    def _on_message(self, message, _binary_data) -> None:
-        if message.get("type") == "error":
-            detail = message.get("stack") or message.get("description") or self.tr("代理发生未知错误")
-            with self._lock:
-                starting = not self.attached
-                if starting:
-                    self._startup_error = detail
-                    self._ready_event.set()
-            if not starting:
-                self.emit("error", detail)
-            return
-        if message.get("type") != "send":
-            return
-
-        payload = message.get("payload")
-        if not isinstance(payload, dict):
-            return
-        event_type = payload.get("type")
-        data = payload.get("data")
-
-        if event_type == "ready":
-            if isinstance(data, dict):
-                game_version = data.get("gameVersion")
-                self.game_version = str(game_version) if game_version else None
-            self._ready_event.set()
-            self.emit("ready", data)
-            return
-        if event_type == "fatal":
-            detail = self.localize_agent_message(data, "代理初始化失败")
-            with self._lock:
-                starting = not self.attached
-                if starting:
-                    self._startup_error = detail
-                    self._ready_event.set()
-            if not starting:
-                self.emit("error", detail)
-            return
-        if event_type == "log":
-            self.emit("log", self.localize_agent_message(data, "代理发生未知错误"))
-            return
-        if event_type != "replay_packet" or not isinstance(data, dict):
-            return
-
-        original = data.get("hex", "")
-        reply = original
-        try:
-            validate_replay_hex(original, self.tr)
-            with self._lock:
-                selected = self.selected
-                armed = self.override_armed
-                if armed:
-                    self.override_armed = False
-
-            if armed and selected:
-                reply = self.store.read(selected)
-                self.emit("loaded", selected)
-            else:
-                saved = self.store.save(original)
-                if saved.created:
-                    self.saved += 1
-                    self.emit("saved", saved.path)
-                else:
-                    self.emit("duplicate", saved.path)
-        except Exception as exc:
-            self.emit("error", self.tr("处理回放失败：{error}", error=exc))
-            reply = original
-        finally:
-            # DeserializeAsync is waiting synchronously; always release it.
-            self._reply(reply)
-
-    def _on_detached(self, reason, crash=None) -> None:
-        with self._lock:
-            if not self.attached and self._startup_error is None:
-                self._startup_error = self.tr("代理启动期间连接断开：{reason}", reason=reason)
-                self._ready_event.set()
-            self.attached = False
-            self.session = None
-            self.script = None
-            self.override_armed = False
-        detail = f"{reason}"
-        if crash:
-            detail += f" ({crash})"
-        self.emit("detached", detail)
-
-    def attach(self) -> bool:
-        with self._lock:
-            if self.attached:
-                return True
-            self._startup_error = None
-            self._ready_event.clear()
-        try:
-            import frida
-        except ImportError:
-            self.emit("error", self.tr("缺少 Frida 运行库，请使用 Release 中的完整 EXE"))
-            return False
-
-        agent = resource_path("agent", "_.js")
-        if not agent.exists():
-            self.emit("error", self.tr("未找到已编译代理 agent/_.js"))
-            return False
-
-        try:
-            device = frida.get_local_device()
-            process = next(
-                (p for p in device.enumerate_processes() if p.name.lower() in {"masterduel.exe", "masterduel"}),
-                None,
-            )
-            if process is None:
-                self.emit("waiting", self.tr("未检测到 Master Duel，请先启动游戏"))
-                return False
-
-            session = device.attach(process.pid)
-            script = session.create_script(agent.read_text(encoding="utf-8"))
-            script.on("message", self._on_message)
-            session.on("detached", self._on_detached)
-            with self._lock:
-                self.session = session
-                self.script = script
-            script.load()
-            if not self._ready_event.wait(READY_TIMEOUT_SECONDS):
-                raise RuntimeError(self.tr("代理在 {seconds} 秒内没有就绪", seconds=READY_TIMEOUT_SECONDS))
-            with self._lock:
-                if self._startup_error:
-                    raise RuntimeError(self._startup_error)
-                self.attached = True
-            self.emit("attached", {"pid": process.pid, "game_version": self.game_version})
-            return True
-        except Exception as exc:
-            self.emit("error", self.tr("连接游戏失败：{error}", error=exc))
-            self.detach()
-            return False
-
-    def arm_override(self, path: Path) -> None:
-        self.store.read(path)
-        with self._lock:
-            if not self.attached:
-                raise RuntimeError(self.tr("请先点击“连接游戏并开始自动保存”"))
-            self.selected = path
-            self.override_armed = True
-        self.emit("armed", path)
-
-    def cancel_override(self, notify: bool = True) -> None:
-        with self._lock:
-            self.override_armed = False
-        if notify:
-            self.emit("cancelled")
-
-    def replace_selected_path(self, old_path: Path, new_path: Path) -> None:
-        with self._lock:
-            if self.selected == old_path:
-                self.selected = new_path
-
-    def detach(self) -> None:
-        with self._lock:
-            script, session = self.script, self.session
-            self.script = self.session = None
-            self.attached = False
-            self.override_armed = False
-        try:
-            if script:
-                script.unload()
-        except Exception:
-            pass
-        try:
-            if session:
-                session.detach()
-        except Exception:
-            pass
 
 
 class ReplayApp:
@@ -693,10 +243,10 @@ class ReplayApp:
         status_text = tk.Frame(status_body, bg=self.CARD)
         status_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.status_title = tk.StringVar(value=self.tr("还没有连接游戏"))
-        self.status_detail = tk.StringVar(value=self.tr("先打开 Master Duel，再点击下面的蓝色按钮。"))
+        self.status_detail = tk.StringVar(value=self.tr("点击下面的蓝色按钮，程序会启动 Master Duel 并自动连接。"))
         self._status_spec = (
             "还没有连接游戏",
-            "先打开 Master Duel，再点击下面的蓝色按钮。",
+            "点击下面的蓝色按钮，程序会启动 Master Duel 并自动连接。",
             self.MUTED,
             {},
             {},
@@ -726,7 +276,7 @@ class ReplayApp:
         action_bar.columnconfigure(1, weight=1, uniform="main_actions")
         self.attach_button = self._button(
             action_bar,
-            self.tr("1. 连接游戏并开始自动保存"),
+            self.tr("1. 启动/连接游戏并自动保存"),
             self.start_attach,
             primary=True,
         )
@@ -734,11 +284,11 @@ class ReplayApp:
         self.play_button = self._button(
             action_bar,
             self.tr("2. 游戏内回放"),
-            self.arm_selected,
+            self.smart_play_selected,
             outlined=True,
         )
         self.play_button.grid(row=0, column=1, sticky="ew", padx=(5, 0), ipady=2)
-        self.attach_text_key = "1. 连接游戏并开始自动保存"
+        self.attach_text_key = "1. 启动/连接游戏并自动保存"
 
         library_card = self._card(content)
         library_card.pack(fill=tk.BOTH, expand=True, pady=(14, 0))
@@ -788,7 +338,7 @@ class ReplayApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree.bind("<Configure>", self.schedule_replay_column_resize)
         self.tree.bind("<<TreeviewSelect>>", lambda _event: self.update_action_states())
-        self.tree.bind("<Double-1>", lambda _event: self.arm_selected())
+        self.tree.bind("<Double-1>", lambda _event: self.smart_play_selected())
         self.tree.bind("<Button-3>", self.show_replay_menu)
         self.tree.bind("<Delete>", lambda _event: self.delete_selected())
         self.tree.bind("<MouseWheel>", self.scroll_replay_list)
@@ -804,11 +354,12 @@ class ReplayApp:
             font=("Microsoft YaHei UI", 9),
         )
         self.replay_menu.add_command(label=self.tr("下一条播放"), command=self.arm_selected)
+        self.replay_menu.add_command(label=self.tr("直接播放"), command=self.direct_play_selected)
         self.replay_menu.add_command(label=self.tr("重命名"), command=self.rename_selected)
         self.replay_menu.add_separator()
         self.replay_menu.add_command(label=self.tr("删除"), command=self.delete_selected)
         self.replay_menu.entryconfigure(
-            3,
+            4,
             background=self.DANGER_BG,
             foreground=self.DANGER_TEXT,
             activebackground=self.DANGER_HOVER,
@@ -818,8 +369,8 @@ class ReplayApp:
         self.tip_label = tk.Label(
             library_card,
             text=self.tr(
-                "双击可准备播放；右键可选择“下一条播放”或“删除”。"
-                "准备播放后，回到游戏播放任意一条可用的官方回放即可。"
+                "双击或点击按钮 2：在首页直接播放，否则改为下一条播放。"
+                "右键还可明确选择“下一条播放”或“直接播放”。"
             ),
             bg="#F8FAFD",
             fg=self.MUTED,
@@ -867,12 +418,13 @@ class ReplayApp:
         self.tree.heading("time", text=self.tr("保存时间"), anchor=self.tk.CENTER)
         self.tree.heading("size", text=self.tr("文件大小"), anchor=self.tk.CENTER)
         self.replay_menu.entryconfigure(0, label=self.tr("下一条播放"))
-        self.replay_menu.entryconfigure(1, label=self.tr("重命名"))
-        self.replay_menu.entryconfigure(3, label=self.tr("删除"))
+        self.replay_menu.entryconfigure(1, label=self.tr("直接播放"))
+        self.replay_menu.entryconfigure(2, label=self.tr("重命名"))
+        self.replay_menu.entryconfigure(4, label=self.tr("删除"))
         self.tip_label.configure(
             text=self.tr(
-                "双击可准备播放；右键可选择“下一条播放”或“删除”。"
-                "准备播放后，回到游戏播放任意一条可用的官方回放即可。"
+                "双击或点击按钮 2：在首页直接播放，否则改为下一条播放。"
+                "右键还可明确选择“下一条播放”或“直接播放”。"
             )
         )
         self.attach_button.configure(text=self.tr(self.attach_text_key))
@@ -1121,8 +673,8 @@ class ReplayApp:
         self._step(
             steps,
             "1",
-            self.tr("打开并连接游戏"),
-            self.tr("先启动 Master Duel，再点击主界面的蓝色连接按钮。"),
+            self.tr("启动并连接游戏"),
+            self.tr("点击主界面的蓝色按钮，程序会启动 Master Duel 并自动连接。"),
         ).grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         self._step(
             steps,
@@ -1352,7 +904,7 @@ class ReplayApp:
         self.play_button.configure(
             state=self.tk.NORMAL if has_selection else self.tk.DISABLED,
             text=self.tr("2. 游戏内回放"),
-            command=self.arm_selected,
+            command=self.smart_play_selected,
             highlightbackground=self.BLUE if has_selection else self.BORDER,
             highlightcolor=self.BLUE if has_selection else self.BORDER,
         )
@@ -1361,9 +913,13 @@ class ReplayApp:
         if self.manager.attached:
             self.set_status("已经连接游戏", "自动保存正在运行，不需要重复点击。", self.GREEN)
             return
-        self.set_status("正在连接游戏…", "通常只需要几秒，请不要关闭游戏。", self.BLUE)
-        self.set_attach_button("正在连接，请稍候…", self.tk.DISABLED)
-        threading.Thread(target=self.manager.attach, daemon=True).start()
+        self.set_status("正在启动并连接游戏…", "游戏启动可能需要一些时间，请稍候。", self.BLUE)
+        self.set_attach_button("正在启动并连接，请稍候…", self.tk.DISABLED)
+        threading.Thread(
+            target=self.manager.attach,
+            kwargs={"launch_if_missing": True},
+            daemon=True,
+        ).start()
 
     def selected_path(self) -> Optional[Path]:
         selected = self.tree.selection()
@@ -1385,6 +941,27 @@ class ReplayApp:
     def scroll_replay_list(self, event) -> str:
         self.tree.yview_scroll(int(-event.delta / 120), "units")
         return "break"
+
+    def request_selected_direct_play(self, fallback_to_next: bool) -> None:
+        path = self.selected_path()
+        if path is None:
+            self.set_status("还没有选择文件", "请先在下方列表中点选一条回放。", self.AMBER)
+            return
+        if not self.manager.attached:
+            self.set_status("请先连接游戏", "点击第 1 个蓝色按钮，连接成功后再播放本地文件。", self.AMBER)
+            return
+        try:
+            self.manager.request_direct_play(path, fallback_to_next)
+            self.update_action_states()
+        except Exception as exc:
+            self.set_status("直接播放失败", "{error}", self.RED, detail_values={"error": exc})
+            self.append_log(str(exc))
+
+    def smart_play_selected(self) -> None:
+        self.request_selected_direct_play(fallback_to_next=True)
+
+    def direct_play_selected(self) -> None:
+        self.request_selected_direct_play(fallback_to_next=False)
 
     def arm_selected(self) -> None:
         path = self.selected_path()
@@ -1782,6 +1359,14 @@ class ReplayApp:
                             version=game_version or self.tr("未读取"),
                         )
                     )
+                elif kind == "launching":
+                    self.set_status(
+                        "正在启动 Master Duel…",
+                        "Steam 已收到启动请求，检测到游戏后会自动连接。",
+                        self.BLUE,
+                    )
+                    self.set_attach_button("正在等待游戏启动…", self.tk.DISABLED)
+                    self.append_log(str(data))
                 elif kind == "ready":
                     version = data.get("version", APP_VERSION) if isinstance(data, dict) else APP_VERSION
                     game_version = data.get("gameVersion") if isinstance(data, dict) else None
@@ -1793,8 +1378,8 @@ class ReplayApp:
                         )
                     )
                 elif kind == "waiting":
-                    self.set_status("没有找到 Master Duel", "请先启动游戏并进入主界面，然后重新点击连接。", self.AMBER)
-                    self.set_attach_button("1. 重新连接游戏", self.tk.NORMAL)
+                    self.set_status("没有找到 Master Duel", str(data), self.AMBER)
+                    self.set_attach_button("1. 重新启动并连接", self.tk.NORMAL)
                 elif kind == "saved":
                     self.set_status(
                         "保存成功",
@@ -1811,6 +1396,42 @@ class ReplayApp:
                     self.set_status("本地回放已经准备好", "现在回到游戏，播放任意一条可用回放。", self.BLUE)
                     self.append_log(self.tr("下一次播放将使用 {name}", name=Path(data).name))
                     self.update_action_states()
+                elif kind == "direct_requested":
+                    details = data if isinstance(data, dict) else {}
+                    requested_path = details.get("path")
+                    self.set_status("正在检查游戏界面…", "首页待机时将自动进入回放，请稍候。", self.BLUE)
+                    if requested_path:
+                        self.append_log(self.tr("请求直接播放 {name}", name=Path(requested_path).name))
+                    self.update_action_states()
+                elif kind in {"direct_queued", "direct_started"}:
+                    self.set_status("正在启动回放…", "已确认游戏处于首页，正在进入官方回放流程。", self.BLUE)
+                elif kind == "direct_triggered":
+                    self.set_status("正在进入本地回放…", "已收到 Duel.begin，等待本地回放数据送入游戏。", self.BLUE)
+                    self.append_log(self.tr("已触发官方回放入口"))
+                elif kind == "direct_carrier_received":
+                    self.append_log(self.tr("已收到直接播放载体数据"))
+                elif kind == "direct_fallback":
+                    details = data if isinstance(data, dict) else {}
+                    fallback_path = details.get("path")
+                    self.set_status("当前不在首页，已改为下一条播放", "回到游戏播放任意可用回放即可。", self.BLUE)
+                    if fallback_path:
+                        self.append_log(
+                            self.tr("非首页待机，下一次播放将使用 {name}", name=Path(fallback_path).name)
+                        )
+                    self.update_action_states()
+                elif kind == "direct_blocked":
+                    self.set_status(
+                        "只能在首页直接播放",
+                        "当前界面：{view}。请回到首页后重试。",
+                        self.AMBER,
+                        detail_values={"view": data or self.tr("未知")},
+                    )
+                    self.append_log(self.tr("直接播放被界面门禁阻止：{view}", view=data or self.tr("未知")))
+                    self.update_action_states()
+                elif kind == "direct_failed":
+                    self.set_status("直接播放失败", "{error}", self.RED, detail_values={"error": data})
+                    self.append_log(self.tr("直接播放失败：{error}", error=data))
+                    self.update_action_states()
                 elif kind == "cancelled":
                     self.set_status("已取消回放", "不会再替换下一条游戏回放，自动保存仍在运行。", self.GREEN)
                     self.append_log(self.tr("已取消准备好的本地回放"))
@@ -1821,7 +1442,7 @@ class ReplayApp:
                     self.update_action_states()
                 elif kind == "detached":
                     self.set_status("游戏连接已断开", "如果游戏仍在运行，请点击按钮重新连接。", self.AMBER)
-                    self.set_attach_button("1. 重新连接游戏", self.tk.NORMAL)
+                    self.set_attach_button("1. 重新启动并连接", self.tk.NORMAL)
                     self.append_log(self.tr("连接断开：{detail}", detail=data))
                     self.update_action_states()
                 elif kind == "error":
