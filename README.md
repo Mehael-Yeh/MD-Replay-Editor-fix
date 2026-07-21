@@ -21,10 +21,10 @@ The project also draws on [pixeltris/YgoMaster](https://github.com/pixeltris/Ygo
 ## Usage
 
 1. Download `MD-Replay-Editor-fix.exe` from [Releases](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/releases).
-2. Start the Steam version of Master Duel and remain on the main screen.
-3. Run the EXE and click **Connect to game and start auto-save**.
-4. Play the replay you want to save in-game. The program will automatically write it to the `replays` folder.
-5. To play a local replay, select the file and click **Play in game**, or right-click and select **Play Next**. Then return to the game and play any currently available official replay. To cancel, click **Cancel Replay**.
+2. Run the EXE and click **Launch/Connect and Auto-Save**. If Master Duel is not running, Steam launches it automatically; remain on the Home screen after startup.
+3. Play the replay you want to save in-game. The program automatically writes it to the `replays` folder.
+4. To play a local replay, double-click it or select it and click **Play in game**. On Home it starts immediately; on any other screen it safely falls back to **Play Next**.
+5. The right-click menu also provides explicit **Play Next** and **Play Now** actions. Use **Cancel Replay** to cancel a pending playback.
 
 The local file replaces only the next replay response. After it is triggered, the program automatically returns to save mode. It does not permanently modify game files or server data.
 
@@ -32,7 +32,8 @@ The local file replaces only the next replay response. After it is triggered, th
 
 - Single-EXE graphical interface with no need to install Python, Node.js, or Frida.
 - Automatically saves complete replays that are actually played in-game.
-- Plays saved local replays in-game.
+- Starts Master Duel through Steam and connects automatically.
+- Plays saved local replays immediately from Home, with a safe Play Next fallback elsewhere.
 - Renames and deletes local replay files.
 
 ## How It Works
@@ -40,7 +41,7 @@ The local file replaces only the next replay response. After it is triggered, th
 The program injects into `masterduel.exe` through Frida and hooks the IL2CPP method `YgomSystem.Network.FormatYgom.DeserializeAsync`.
 
 - When a replay response containing a `replaym` data section is received, the program saves the complete raw bytes as a `.replay` file.
-- When playing a local file, only the next official replay response is replaced with the selected file.
+- Direct playback first verifies that the game is idle on Home, enters the official replay flow, and only replaces the `Duel.begin` replay payload. Outside Home, the smart action arms a one-shot Play Next replacement instead.
 - If processing fails, the original game response is used automatically to prevent the replay loading thread from hanging.
 
 ## Running from Source

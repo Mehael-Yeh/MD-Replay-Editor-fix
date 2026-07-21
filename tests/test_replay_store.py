@@ -2,8 +2,17 @@ import tempfile
 import unittest
 import os
 from pathlib import Path
+from unittest.mock import patch
 
-from main import ReplayManager, ReplayStore, validate_replay_hex
+from main import (
+    MASTER_DUEL_STEAM_URI,
+    ReplayManager,
+    ReplayStore,
+    find_master_duel_process,
+    launch_master_duel,
+    validate_replay_hex,
+    wait_for_master_duel_process,
+)
 
 
 VALID = (b"\x01prefix-replaym-payload\xff").hex()
@@ -83,6 +92,39 @@ class FakeScript:
     def post(self, message):
         self.messages.append(message)
 
+class FakeProcess:
+    def __init__(self, name, pid=1):
+        self.name = name
+        self.pid = pid
+
+
+class FakeDevice:
+    def __init__(self, snapshots):
+        self.snapshots = list(snapshots)
+
+    def enumerate_processes(self):
+        if len(self.snapshots) > 1:
+            return self.snapshots.pop(0)
+        return self.snapshots[0]
+
+
+class GameLaunchTests(unittest.TestCase):
+    def test_find_master_duel_process_is_case_insensitive(self):
+        expected = FakeProcess("MASTERDUEL.EXE", 42)
+        device = FakeDevice([[FakeProcess("steam.exe"), expected]])
+        self.assertIs(find_master_duel_process(device), expected)
+
+    def test_wait_for_process_retries_until_game_appears(self):
+        expected = FakeProcess("masterduel.exe", 42)
+        device = FakeDevice([[], [], [expected]])
+        with patch("main.time.sleep") as sleep:
+            self.assertIs(wait_for_master_duel_process(device, timeout=3, poll_interval=1), expected)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_launch_uses_master_duel_steam_uri_on_windows(self):
+        with patch("main.os.name", "nt"), patch("main.os.startfile", create=True) as startfile:
+            launch_master_duel()
+        startfile.assert_called_once_with(MASTER_DUEL_STEAM_URI)
 
 class ReplayManagerTests(unittest.TestCase):
     def test_ready_message_records_game_version(self):
@@ -93,7 +135,7 @@ class ReplayManagerTests(unittest.TestCase):
                     "type": "send",
                     "payload": {
                         "type": "ready",
-                        "data": {"version": "v2.7.0_R4", "gameVersion": "2.7.0"},
+                        "data": {"version": "v2.7.0_R5", "gameVersion": "2.7.0"},
                     },
                 },
                 None,
@@ -143,6 +185,66 @@ class ReplayManagerTests(unittest.TestCase):
             self.assertFalse(manager.override_armed)
             self.assertEqual(len(store.list()), 1)
             self.assertEqual(events[-1], ("loaded", selected))
+
+    def test_direct_play_request_arms_override_and_posts_agent_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            events = []
+            store = ReplayStore(Path(tmp))
+            selected = store.save(VALID).path
+            manager = ReplayManager(store, lambda kind, data=None: events.append((kind, data)))
+            manager.script = FakeScript()
+            manager.attached = True
+            manager.request_direct_play(selected, fallback_to_next=True)
+            self.assertTrue(manager.override_armed)
+            self.assertTrue(manager.direct_pending)
+            self.assertEqual(manager.script.messages[-1], {"type": "direct_play", "fallback": True})
+            self.assertEqual(events[-1][0], "direct_requested")
+
+    def test_smart_direct_play_falls_back_to_next_when_not_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            events = []
+            store = ReplayStore(Path(tmp))
+            selected = store.save(VALID).path
+            manager = ReplayManager(store, lambda kind, data=None: events.append((kind, data)))
+            manager.script = FakeScript()
+            manager.attached = True
+            manager.request_direct_play(selected, fallback_to_next=True)
+            manager._on_message(
+                {
+                    "type": "send",
+                    "payload": {
+                        "type": "direct_play_blocked",
+                        "data": {"topClass": "DuelClient", "fallback": True},
+                    },
+                },
+                None,
+            )
+            self.assertTrue(manager.override_armed)
+            self.assertFalse(manager.direct_pending)
+            self.assertEqual(events[-1][0], "direct_fallback")
+
+    def test_explicit_direct_play_is_cancelled_when_not_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            events = []
+            store = ReplayStore(Path(tmp))
+            selected = store.save(VALID).path
+            manager = ReplayManager(store, lambda kind, data=None: events.append((kind, data)))
+            manager.script = FakeScript()
+            manager.attached = True
+            manager.request_direct_play(selected, fallback_to_next=False)
+            manager._on_message(
+                {
+                    "type": "send",
+                    "payload": {
+                        "type": "direct_play_blocked",
+                        "data": {"topClass": "DuelClient", "fallback": False},
+                    },
+                },
+                None,
+            )
+            self.assertFalse(manager.override_armed)
+            self.assertFalse(manager.direct_pending)
+            self.assertEqual(events[-1], ("direct_blocked", "DuelClient"))
 
     def test_armed_override_can_be_cancelled(self):
         with tempfile.TemporaryDirectory() as tmp:

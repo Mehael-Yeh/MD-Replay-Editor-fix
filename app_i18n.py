@@ -1,0 +1,213 @@
+"""Language resources and persisted UI language settings."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+
+DEFAULT_LANGUAGE = "zh-CN"
+LANGUAGE_NAMES = {"zh-CN": "中文", "en": "English"}
+AGENT_MESSAGE_TEMPLATES = {
+    "agent.game_version_read_failed": "无法读取游戏版本：{error}",
+    "agent.replay_processing_failed": "回放数据处理失败，使用游戏原响应：{error}",
+    "agent.il2cpp_initialization_failed": "IL2CPP 初始化失败：{error}",
+}
+
+ENGLISH_TRANSLATIONS = {
+    "文件不是有效的十六进制回放数据": "The file does not contain valid hexadecimal replay data.",
+    "文件中未找到 Master Duel 回放标记": "The Master Duel replay marker was not found in the file.",
+    "只能管理回放保存目录中的 .replay 文件": "Only .replay files in the replay folder can be managed.",
+    "请输入新的回放名称": "Enter a new replay name.",
+    '名称不能包含以下字符：< > : " / \\ | ? *': 'The name cannot contain these characters: < > : " / \\ | ? *',
+    "名称不能以句点或空格结尾": "The name cannot end with a period or space.",
+    "这个名称由 Windows 系统保留，请换一个名称": "This name is reserved by Windows. Choose a different name.",
+    "已经存在名为“{name}”的回放": 'A replay named "{name}" already exists.',
+    "代理发生未知错误": "An unknown agent error occurred.",
+    "代理初始化失败": "Agent initialization failed.",
+    "无法读取游戏版本：{error}": "Failed to read the game version: {error}",
+    "回放数据处理失败，使用游戏原响应：{error}": "Replay processing failed; using the original game response: {error}",
+    "IL2CPP 初始化失败：{error}": "IL2CPP initialization failed: {error}",
+    "处理回放失败：{error}": "Failed to process replay: {error}",
+    "代理启动期间连接断开：{reason}": "The connection was lost while the agent was starting: {reason}",
+    "缺少 Frida 运行库，请使用 Release 中的完整 EXE": "The Frida runtime is missing. Use the complete EXE from Releases.",
+    "未找到已编译代理 agent/_.js": "The compiled agent agent/_.js was not found.",
+    "未检测到 Master Duel，请先启动游戏": "Master Duel was not detected. Start the game first.",
+    "代理在 {seconds} 秒内没有就绪": "The agent was not ready within {seconds} seconds.",
+    "连接游戏失败：{error}": "Failed to connect to the game: {error}",
+    "请先点击“连接游戏并开始自动保存”": 'Click "Connect to game and start auto-save" first.',
+    "Master Duel 回放助手": "Master Duel Replay Editor",
+    "自动保存看过的回放，也能把本地回放重新放进游戏播放": "Automatically save watched replays and play local replays in-game",
+    "运行记录": "Activity Log",
+    "教程": "Tutorial",
+    "语言": "Language",
+    "还没有连接游戏": "Not connected to the game",
+    "先打开 Master Duel，再点击下面的蓝色按钮。": "Open Master Duel first, then click the blue button below.",
+    "1. 连接游戏并开始自动保存": "1. Connect to game and start auto-save",
+    "2. 游戏内回放": "2. Play in game",
+    "已保存的回放": "Saved Replays",
+    "已保存的回放（{count}）": "Saved Replays ({count})",
+    "打开保存位置": "Open Folder",
+    "刷新列表": "Refresh",
+    "文件名": "File Name",
+    "保存时间": "Saved At",
+    "文件大小": "Size",
+    "下一条播放": "Play Next",
+    "重命名": "Rename",
+    "删除": "Delete",
+    "双击可准备播放；右键可选择“下一条播放”或“删除”。准备播放后，回到游戏播放任意一条可用的官方回放即可。": 'Double-click to prepare playback, or right-click and choose "Play Next" or "Delete." Then return to the game and play any available official replay.',
+    "{app} {version} 已启动": "{app} {version} started",
+    "回放目录：{directory}": "Replay folder: {directory}",
+    "使用教程": "Tutorial",
+    "三步开始自动保存回放": "Start Auto-Saving Replays in Three Steps",
+    "程序只保存你在游戏里实际播放过的回放，不需要修改游戏文件。": "The program only saves replays you actually play in-game and does not modify game files.",
+    "打开并连接游戏": "Open and Connect to the Game",
+    "先启动 Master Duel，再点击主界面的蓝色连接按钮。": "Start Master Duel, then click the blue connect button on the main screen.",
+    "正常播放一条回放": "Play a Replay Normally",
+    "回到游戏，打开你想保存的回放并开始播放。": "Return to the game, open the replay you want to save, and start playing it.",
+    "等待保存成功": "Wait for It to Save",
+    "程序检测到数据后会自动保存，并显示在回放列表中。": "The program saves detected replay data automatically and adds it to the replay list.",
+    "怎样播放已保存的回放？": "How Do I Play a Saved Replay?",
+    "在主界面选中一条回放，双击它或右键选择“下一条播放”。随后回到游戏，播放任意一条当前可用的官方回放；程序只替换这一次播放。如果临时不想播放，点击主界面的“取消回放”即可。": 'Select a replay on the main screen, then double-click it or right-click and choose "Play Next." Return to the game and play any currently available official replay; only that playback is replaced. Click "Cancel Replay" on the main screen if you change your mind.',
+    "知道了": "Got It",
+    "正常使用时不需要查看。提交 Issue 时，请先复制下面的内容。": "You normally do not need this. Copy the content below before submitting an issue.",
+    "复制全部": "Copy All",
+    "打开 GitHub Issues": "Open GitHub Issues",
+    "关闭": "Close",
+    "程序版本：{version}": "App version: {version}",
+    "适配游戏版本：{version}": "Supported game version: {version}",
+    "检测到的游戏版本：{version}": "Detected game version: {version}",
+    "尚未读取": "Not detected",
+    "系统：{system}": "System: {system}",
+    "Python：{version}": "Python: {version}",
+    "回放目录：{directory}": "Replay folder: {directory}",
+    "运行记录：": "Activity log:",
+    "已将运行记录复制到剪贴板": "Activity log copied to the clipboard",
+    "取消回放": "Cancel Replay",
+    "已经连接游戏": "Already Connected",
+    "自动保存正在运行，不需要重复点击。": "Auto-save is running; you do not need to connect again.",
+    "正在连接游戏…": "Connecting to the Game…",
+    "通常只需要几秒，请不要关闭游戏。": "This usually takes only a few seconds. Do not close the game.",
+    "正在连接，请稍候…": "Connecting, please wait…",
+    "还没有选择文件": "No File Selected",
+    "请先在下方列表中点选一条回放。": "Select a replay from the list below first.",
+    "请先连接游戏": "Connect to the Game First",
+    "点击第 1 个蓝色按钮，连接成功后再播放本地文件。": "Click the first blue button and wait for a successful connection before playing a local file.",
+    "准备本地回放失败": "Failed to Prepare Local Replay",
+    "请先在列表中选择要重命名的回放。": "Select the replay you want to rename first.",
+    "重命名回放": "Rename Replay",
+    "起一个容易辨认的名称，回放内容不会改变。": "Choose an easy-to-recognize name. The replay content will not change.",
+    "回放名称": "Replay Name",
+    "重命名成功": "Replay Renamed",
+    "新的名称是 {name}": "The new name is {name}",
+    "已将 {old} 重命名为 {new}": "Renamed {old} to {new}",
+    "文件已经不存在": "File No Longer Exists",
+    "列表已自动刷新。": "The list has been refreshed automatically.",
+    "取消": "Cancel",
+    "请先在列表中选择要删除的回放。": "Select the replay you want to delete first.",
+    "删除回放": "Delete Replay",
+    "确定要永久删除这条回放吗？\n\n{name}": "Permanently delete this replay?\n\n{name}",
+    "此操作无法撤销。删除后，这条回放将从本地永久移除。": "This action cannot be undone. The replay will be permanently removed from this device.",
+    "要删除的文件": "File to delete",
+    "回放已删除": "Replay Deleted",
+    "{name} 已从本地删除。": "{name} was deleted locally.",
+    "已删除 {name}": "Deleted {name}",
+    "删除失败": "Delete Failed",
+    "删除失败：{error}": "Delete failed: {error}",
+    "游戏版本可能不兼容": "Game Version May Be Incompatible",
+    "检测到 Master Duel {game}，本程序适配 {supported}。请前往 GitHub 获取新版。": "Master Duel {game} was detected, but this app supports {supported}. Visit GitHub for an update.",
+    "版本不匹配：游戏 {game}，程序适配 {supported}": "Version mismatch: game {game}, app supports {supported}",
+    "已确认游戏版本 {version}。": "Game version {version} confirmed. ",
+    "连接成功，自动保存已开启": "Connected; Auto-Save Is On",
+    "{version_detail}现在去游戏里播放回放；播放过的内容会自动出现在下方。": "{version_detail}Play replays in-game and they will appear below automatically.",
+    "已连接 · 自动保存运行中": "Connected · Auto-Save Running",
+    "未读取": "Not detected",
+    "已连接 Master Duel（PID {pid}，游戏版本 {version}）": "Connected to Master Duel (PID {pid}, game version {version})",
+    "回放组件已就绪（{version}，游戏版本 {game}）": "Replay component ready ({version}, game version {game})",
+    "没有找到 Master Duel": "Master Duel Not Found",
+    "请先启动游戏并进入主界面，然后重新点击连接。": "Start the game and reach the main screen, then click connect again.",
+    "1. 重新连接游戏": "1. Reconnect to Game",
+    "保存成功": "Replay Saved",
+    "{name} 已加入下方列表。": "{name} was added to the list below.",
+    "已保存 {name}": "Saved {name}",
+    "这条回放已经保存过": "Replay Already Saved",
+    "程序不会重复保存，因此不会浪费磁盘空间。": "Duplicate replays are skipped to avoid wasting disk space.",
+    "跳过重复文件 {name}": "Skipped duplicate file {name}",
+    "本地回放已经准备好": "Local Replay Ready",
+    "现在回到游戏，播放任意一条可用回放。": "Return to the game and play any available replay.",
+    "下一次播放将使用 {name}": "The next playback will use {name}",
+    "已取消回放": "Replay Cancelled",
+    "不会再替换下一条游戏回放，自动保存仍在运行。": "The next replay will not be replaced; auto-save is still running.",
+    "已取消准备好的本地回放": "Cancelled the prepared local replay",
+    "本地回放已送入游戏": "Local Replay Sent to Game",
+    "本次播放已替换；程序现在自动恢复保存模式。": "This playback was replaced; the program has returned to save mode.",
+    "已加载 {name}": "Loaded {name}",
+    "游戏连接已断开": "Game Disconnected",
+    "如果游戏仍在运行，请点击按钮重新连接。": "If the game is still running, click the button to reconnect.",
+    "连接断开：{detail}": "Disconnected: {detail}",
+    "连接或运行失败": "Connection or Runtime Failure",
+    "1. 重试连接": "1. Retry Connection",
+    "错误：{error}": "Error: {error}",
+}
+
+
+
+ENGLISH_TRANSLATIONS.update({
+    "点击下面的蓝色按钮，程序会启动 Master Duel 并自动连接。": "Click the blue button below to launch Master Duel and connect automatically.",
+    "1. 启动/连接游戏并自动保存": "1. Launch/Connect and Auto-Save",
+    "启动并连接游戏": "Launch and Connect to the Game",
+    "点击主界面的蓝色按钮，程序会启动 Master Duel 并自动连接。": "Click the blue button to launch Master Duel and connect automatically.",
+    "请先点击“启动/连接游戏并自动保存”": 'Click "Launch/Connect and Auto-Save" first.',
+    "直接播放": "Play Now",
+    "双击或点击按钮 2：在首页直接播放，否则改为下一条播放。右键还可明确选择“下一条播放”或“直接播放”。": "Double-click or use button 2 to play immediately from Home; elsewhere it falls back to Play Next. Right-click to explicitly choose Play Next or Play Now.",
+    "正在启动并连接游戏…": "Launching and Connecting…",
+    "游戏启动可能需要一些时间，请稍候。": "The game may take a moment to start.",
+    "正在启动并连接，请稍候…": "Launching and connecting…",
+    "正在通过 Steam 启动 Master Duel": "Launching Master Duel through Steam",
+    "启动后 {seconds} 秒内未检测到 Master Duel": "Master Duel was not detected within {seconds} seconds after launch.",
+    "正在启动 Master Duel…": "Launching Master Duel…",
+    "Steam 已收到启动请求，检测到游戏后会自动连接。": "Steam received the launch request; the app will connect when the game is detected.",
+    "正在等待游戏启动…": "Waiting for the game…",
+    "1. 重新启动并连接": "1. Relaunch and Connect",
+    "直接播放请求正在处理中": "A direct-play request is already in progress.",
+    "直接播放失败": "Direct Playback Failed",
+    "正在检查游戏界面…": "Checking the Game Screen…",
+    "首页待机时将自动进入回放，请稍候。": "Playback will start automatically when the game is idle on Home.",
+    "请求直接播放 {name}": "Requested direct playback for {name}",
+    "正在启动回放…": "Starting Replay…",
+    "已确认游戏处于首页，正在进入官方回放流程。": "Home is confirmed; entering the official replay flow.",
+    "正在进入本地回放…": "Entering Local Replay…",
+    "已收到 Duel.begin，等待本地回放数据送入游戏。": "Duel.begin was detected; waiting to send the local replay.",
+    "已触发官方回放入口": "Triggered the official replay entry point",
+    "已收到直接播放载体数据": "Received the direct-play carrier data",
+    "当前不在首页，已改为下一条播放": "Not on Home; Switched to Play Next",
+    "回到游戏播放任意可用回放即可。": "Return to the game and play any available replay.",
+    "非首页待机，下一次播放将使用 {name}": "Not idle on Home; the next playback will use {name}",
+    "只能在首页直接播放": "Direct Playback Requires Home",
+    "当前界面：{view}。请回到首页后重试。": "Current screen: {view}. Return to Home and try again.",
+    "未知": "Unknown",
+    "直接播放被界面门禁阻止：{view}": "Direct playback was blocked by screen state: {view}",
+    "直接播放失败：{error}": "Direct playback failed: {error}",
+})
+
+def translate(language: str, text: str, **values: object) -> str:
+    template = ENGLISH_TRANSLATIONS.get(text, text) if language == "en" else text
+    return template.format(**values)
+
+
+def settings_path(data_dir: Path) -> Path:
+    return data_dir.parent / "settings.json"
+
+
+def load_language(data_dir: Path) -> str:
+    try:
+        value = json.loads(settings_path(data_dir).read_text(encoding="utf-8")).get("language")
+        return value if value in LANGUAGE_NAMES else DEFAULT_LANGUAGE
+    except (OSError, ValueError, TypeError, AttributeError):
+        return DEFAULT_LANGUAGE
+
+
+def save_language(data_dir: Path, language: str) -> None:
+    path = settings_path(data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"language": language}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
