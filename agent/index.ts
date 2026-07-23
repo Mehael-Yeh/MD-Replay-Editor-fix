@@ -3,12 +3,20 @@ import "frida-il2cpp-bridge";
 const REPLAY_MARKER_HEX = "7265706c61796d"; // ASCII: replaym
 const AGENT_VERSION = "v2.7.0_R5";
 const DIRECT_PLAY_TIMEOUT_MS = 60000;
+const HOME_STABLE_MS = 3000;
+const NETWORK_QUIET_MS = 4000;
+const REPLAY_ROUTE_TIMEOUT_MS = 60000;
 
 type DirectPlayStage = "idle" | "queued" | "waiting_packet";
 
 let directPlayStage: DirectPlayStage = "idle";
 let directPlayFallback = false;
 let directPlayDeadline = 0;
+let homeFocused: boolean | null = null;
+let homeTransitioning = false;
+let homeStableSince = 0;
+let networkQuietUntil = 0;
+let replayRouteDeadline = 0;
 
 function emit(type: string, data: unknown = null): void {
     send({ type, data });
@@ -96,8 +104,14 @@ Il2Cpp.perform(() => {
 
     const managerClass = game.tryClass("YgomGame.Menu.ContentViewControllerManager");
     const homeClass = game.tryClass("YgomGame.Menu.HomeViewController");
+    const requestClass = game.tryClass("YgomSystem.Network.Request");
     const urlSchemeClass = game.tryClass("YgomSystem.Utility.UrlScheme");
     const homeUpdate = homeClass?.tryMethod("Update", 0);
+    const homeFocusChanged = homeClass?.tryMethod("OnFocusChanged", 1);
+    const homeTransitionStart = homeClass?.tryMethod("OnTransitionStart", 1);
+    const homeTransitionEnd = homeClass?.tryMethod("OnTransitionEnd", 1);
+    const requestEntry = requestClass?.tryMethod("Entry", 3);
+    const urlOpen = urlSchemeClass?.tryMethod("Open", 3);
     const directPlayAvailable = Boolean(managerClass && urlSchemeClass && homeUpdate);
 
     function topViewControllerName(): string | null {
@@ -109,6 +123,86 @@ Il2Cpp.perform(() => {
         return top?.class?.name ?? null;
     }
 
+    function markHomeUnsafe(): void {
+        homeStableSince = 0;
+    }
+
+    function homeIdleState(): { idle: boolean; topClass: string; reason?: string } {
+        const topClass = topViewControllerName() ?? "Unknown";
+        if (topClass !== "HomeViewController") {
+            return { idle: false, topClass, reason: "not_home" };
+        }
+        if (homeFocused === false) {
+            return { idle: false, topClass, reason: "home_not_focused" };
+        }
+        if (homeTransitioning) {
+            return { idle: false, topClass, reason: "home_transitioning" };
+        }
+        if (Date.now() < networkQuietUntil) {
+            return { idle: false, topClass, reason: "network_busy" };
+        }
+        if (!homeStableSince || Date.now() - homeStableSince < HOME_STABLE_MS) {
+            return { idle: false, topClass, reason: "home_not_stable" };
+        }
+        return { idle: true, topClass };
+    }
+
+    if (requestEntry) {
+        Interceptor.attach(requestEntry.virtualAddress, {
+            onEnter() {
+                networkQuietUntil = Date.now() + NETWORK_QUIET_MS;
+                markHomeUnsafe();
+            }
+        });
+    }
+
+    if (urlOpen) {
+        Interceptor.attach(urlOpen.virtualAddress, {
+            onEnter(args) {
+                try {
+                    const url = new Il2Cpp.String(args[0]).content ?? "";
+                    if (url.startsWith("duel:push?")) {
+                        if (/[?&]GameMode=7(?:&|$)/i.test(url)) {
+                            replayRouteDeadline = Date.now() + REPLAY_ROUTE_TIMEOUT_MS;
+                            emit("replay_route_detected", { url });
+                        } else {
+                            replayRouteDeadline = 0;
+                        }
+                    }
+                } catch (_) {}
+            }
+        });
+    }
+
+    if (homeFocusChanged) {
+        Interceptor.attach(homeFocusChanged.virtualAddress, {
+            onEnter(args) {
+                homeFocused = args[1].toInt32() !== 0;
+                if (!homeFocused) {
+                    markHomeUnsafe();
+                }
+            }
+        });
+    }
+
+    if (homeTransitionStart) {
+        Interceptor.attach(homeTransitionStart.virtualAddress, {
+            onEnter() {
+                homeTransitioning = true;
+                markHomeUnsafe();
+            }
+        });
+    }
+
+    if (homeTransitionEnd) {
+        Interceptor.attach(homeTransitionEnd.virtualAddress, {
+            onEnter() {
+                homeTransitioning = false;
+                markHomeUnsafe();
+            }
+        });
+    }
+
     function listenForDirectPlay(): void {
         recv("direct_play", (message: { fallback?: boolean }) => {
             const fallback = message?.fallback === true;
@@ -117,14 +211,18 @@ Il2Cpp.perform(() => {
             } else if (directPlayStage !== "idle") {
                 emit("direct_play_failed", { reason: "已有直接播放请求正在处理", fallback });
             } else {
-                const topClass = topViewControllerName();
-                if (topClass !== "HomeViewController") {
-                    emit("direct_play_blocked", { topClass, fallback });
+                const state = homeIdleState();
+                if (!state.idle) {
+                    emit("direct_play_blocked", {
+                        topClass: state.topClass,
+                        reason: state.reason,
+                        fallback
+                    });
                 } else {
                     directPlayFallback = fallback;
                     directPlayStage = "queued";
                     directPlayDeadline = Date.now() + DIRECT_PLAY_TIMEOUT_MS;
-                    emit("direct_play_queued", { topClass });
+                    emit("direct_play_queued", { topClass: state.topClass });
                 }
             }
             listenForDirectPlay();
@@ -142,16 +240,34 @@ Il2Cpp.perform(() => {
     }
 
     if (homeUpdate) {
-        homeUpdate.implementation = function (): void {
+        Interceptor.attach(homeUpdate.virtualAddress, {
+            onEnter() {
             try {
+                const state = homeIdleState();
+                if (
+                    state.topClass === "HomeViewController" &&
+                    homeFocused !== false &&
+                    !homeTransitioning &&
+                    Date.now() >= networkQuietUntil
+                ) {
+                    if (!homeStableSince) {
+                        homeStableSince = Date.now();
+                    }
+                } else {
+                    markHomeUnsafe();
+                }
                 if (directPlayStage !== "idle" && Date.now() > directPlayDeadline) {
                     failDirectPlay("等待回放启动超时");
                 } else if (directPlayStage === "queued") {
-                    const topClass = topViewControllerName();
-                    if (topClass !== "HomeViewController") {
+                    const queuedState = homeIdleState();
+                    if (!queuedState.idle) {
                         const fallback = directPlayFallback;
                         resetDirectPlay();
-                        emit("direct_play_blocked", { topClass, fallback });
+                        emit("direct_play_blocked", {
+                            topClass: queuedState.topClass,
+                            reason: queuedState.reason,
+                            fallback
+                        });
                     } else {
                         const url = "duellive:push?menu_id=1&idx=0&opt=0&mrk=0&reverse=0";
                         directPlayStage = "waiting_packet";
@@ -171,43 +287,65 @@ Il2Cpp.perform(() => {
             } catch (error) {
                 failDirectPlay(`触发官方回放失败：${error}`);
             }
-            (this as Il2Cpp.Object).method("Update", 0).invoke();
-        };
+            }
+        });
     }
 
-    deserializeAsync.implementation = function (
-        bytes: Il2Cpp.Array<number>,
-        onFinish: Il2Cpp.Object
-    ): void {
-        let effectiveBytes = bytes;
-        try {
-            const originalHex = bytesToHex(bytes);
-            if (originalHex.includes(REPLAY_MARKER_HEX)) {
-                if (directPlayStage === "waiting_packet") {
-                    resetDirectPlay();
-                    emit("direct_play_carrier_received");
-                }
-                emit("replay_packet", { hex: originalHex, byteLength: bytes.length });
-                let replacementHex = originalHex;
-                recv("replay_reply", (message: { replay?: string }) => {
-                    if (message && typeof message.replay === "string") {
-                        replacementHex = message.replay;
+    Interceptor.attach(deserializeAsync.virtualAddress, {
+        onEnter(args) {
+            this.replacementRequested = false;
+            try {
+                const bytes = new Il2Cpp.Array<number>(args[1]);
+                const originalHex = bytesToHex(bytes);
+                if (originalHex.includes(REPLAY_MARKER_HEX)) {
+                    const directCarrier = directPlayStage === "waiting_packet";
+                    const replacementAllowed =
+                        directCarrier || Date.now() < replayRouteDeadline;
+                    if (directCarrier) {
+                        resetDirectPlay();
+                        emit("direct_play_carrier_received");
                     }
-                }).wait();
-                if (replacementHex !== originalHex) {
-                    effectiveBytes = Il2Cpp.array(byteClass, hexToBytes(replacementHex));
+                    emit("replay_packet", {
+                        hex: originalHex,
+                        byteLength: bytes.length,
+                        replacementAllowed
+                    });
+                    let replacementHex = originalHex;
+                    recv("replay_reply", (message: { replay?: string }) => {
+                        if (message && typeof message.replay === "string") {
+                            replacementHex = message.replay;
+                        }
+                    }).wait();
+                    if (replacementHex !== originalHex) {
+                        if (replacementAllowed) {
+                            const replacementArray = Il2Cpp.array(
+                                byteClass,
+                                hexToBytes(replacementHex)
+                            );
+                            this.replacementArray = replacementArray;
+                            this.replacementRequested = true;
+                            args[1] = replacementArray.handle;
+                        } else {
+                            emit("replay_replacement_blocked", {
+                                reason: "not_official_replay_route"
+                            });
+                        }
+                    }
                 }
+            } catch (error) {
+                emit("log", {
+                    message: "agent.replay_processing_failed",
+                    error: String(error)
+                });
             }
-        } catch (error) {
-            emit("log", {
-                message: "agent.replay_processing_failed",
-                error: String(error)
-            });
+        },
+        onLeave() {
+            if (this.replacementRequested === true) {
+                replayRouteDeadline = 0;
+                emit("replay_replacement_applied");
+            }
         }
-        (this as Il2Cpp.Object)
-            .method("DeserializeAsync", 2)
-            .invoke(effectiveBytes, onFinish);
-    };
+    });
 
     listenForDirectPlay();
     listenForDirectPlayCancel();

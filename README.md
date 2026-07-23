@@ -27,6 +27,7 @@ The project also draws on [pixeltris/YgoMaster](https://github.com/pixeltris/Ygo
 5. The right-click menu also provides explicit **Play Next** and **Play Now** actions. Use **Cancel Replay** to cancel a pending playback.
 
 The local file replaces only the next replay response. After it is triggered, the program automatically returns to save mode. It does not permanently modify game files or server data.
+Play Next recognizes official replay routes only. Live Ranked, Casual, and Event Duel `Duel.begin` data always passes through unchanged.
 
 ## Features
 
@@ -41,7 +42,7 @@ The local file replaces only the next replay response. After it is triggered, th
 The program injects into `masterduel.exe` through Frida and hooks the IL2CPP method `YgomSystem.Network.FormatYgom.DeserializeAsync`.
 
 - When a replay response containing a `replaym` data section is received, the program saves the complete raw bytes as a `.replay` file.
-- Direct playback first verifies that the game is idle on Home, enters the official replay flow, and only replaces the `Duel.begin` replay payload. Outside Home, the smart action arms a one-shot Play Next replacement instead.
+- Direct playback requires a stable, focused Home screen with no transition or active network request. Replacement also requires an official `GameMode=7` replay route; live Ranked, Casual, and Event Duels are never replaced.
 - If processing fails, the original game response is used automatically to prevent the replay loading thread from hanging.
 
 ## Running from Source

@@ -44,6 +44,18 @@ GITHUB_URL = "https://github.com/Mehael-Yeh/MD-Replay-Editor-fix"
 GITHUB_ISSUES_URL = f"{GITHUB_URL}/issues/new"
 
 
+def replay_marker_pixels() -> set[tuple[int, int]]:
+    """Return a padded, symmetric right-pointing triangle for the replay list."""
+    left, right = 4, 13
+    center_y, half_base = 8, 5
+    pixels: set[tuple[int, int]] = set()
+    for x in range(left, right + 1):
+        half_height = round(half_base * (right - x) / (right - left))
+        for y in range(center_y - half_height, center_y + half_height + 1):
+            pixels.add((x, y))
+    return pixels
+
+
 def resource_path(*parts: str) -> Path:
     root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     return root.joinpath(*parts)
@@ -112,12 +124,10 @@ class ReplayApp:
             root.iconphoto(True, self.app_icon)
         except Exception:
             pass
-        self.empty_replay_marker = tk.PhotoImage(width=14, height=14)
-        self.armed_replay_marker = tk.PhotoImage(width=14, height=14)
-        for x in range(3, 11):
-            inset = (x - 3) // 2
-            for y in range(2 + inset, 12 - inset):
-                self.armed_replay_marker.put(self.BLUE, (x, y))
+        self.empty_replay_marker = tk.PhotoImage(width=18, height=18)
+        self.armed_replay_marker = tk.PhotoImage(width=18, height=18)
+        for x, y in replay_marker_pixels():
+            self.armed_replay_marker.put(self.BLUE, (x, y))
         root.geometry("1000x680")
         root.minsize(880, 600)
         root.configure(bg=self.BG)
@@ -1393,7 +1403,7 @@ class ReplayApp:
                     self.set_status("这条回放已经保存过", "程序不会重复保存，因此不会浪费磁盘空间。", self.GREEN)
                     self.append_log(self.tr("跳过重复文件 {name}", name=Path(data).name))
                 elif kind == "armed":
-                    self.set_status("本地回放已经准备好", "现在回到游戏，播放任意一条可用回放。", self.BLUE)
+                    self.set_status("本地回放已经准备好", "现在回到游戏，播放任意一条可用的官方回放。", self.BLUE)
                     self.append_log(self.tr("下一次播放将使用 {name}", name=Path(data).name))
                     self.update_action_states()
                 elif kind == "direct_requested":
@@ -1413,7 +1423,7 @@ class ReplayApp:
                 elif kind == "direct_fallback":
                     details = data if isinstance(data, dict) else {}
                     fallback_path = details.get("path")
-                    self.set_status("当前不在首页，已改为下一条播放", "回到游戏播放任意可用回放即可。", self.BLUE)
+                    self.set_status("当前不在首页，已改为下一条播放", "回到游戏播放任意可用的官方回放即可；真实对战不会被替换。", self.BLUE)
                     if fallback_path:
                         self.append_log(
                             self.tr("非首页待机，下一次播放将使用 {name}", name=Path(fallback_path).name)

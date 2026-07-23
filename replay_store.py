@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +36,7 @@ class ReplayStore:
     def __init__(self, directory: Path, translator: Optional[Callable[..., str]] = None):
         self.directory = directory
         self.tr = translator or (lambda text, **values: text.format(**values))
+        self._save_lock = threading.RLock()
         self.directory.mkdir(parents=True, exist_ok=True)
 
     def list(self) -> list[Path]:
@@ -76,30 +78,37 @@ class ReplayStore:
         source.rename(target)
         return target
 
+    def _find_duplicate(self, replay_hex: str, digest: str) -> Optional[Path]:
+        preferred = list(self.directory.glob(f"*_{digest}.replay"))
+        preferred_set = set(preferred)
+        candidates = preferred + [
+            candidate
+            for candidate in self.directory.glob("*.replay")
+            if candidate not in preferred_set
+        ]
+        for candidate in candidates:
+            try:
+                if self.read(candidate) == replay_hex:
+                    return candidate
+            except (OSError, ValueError):
+                continue
+        return None
+
     def save(self, replay_hex: str) -> SavedReplay:
         replay_hex = validate_replay_hex(replay_hex, self.tr)
         digest = hashlib.sha256(bytes.fromhex(replay_hex)).hexdigest()[:12]
-        existing = next(self.directory.glob(f"*_{digest}.replay"), None)
-        if existing is None:
-            for candidate in self.directory.glob("*.replay"):
-                try:
-                    candidate_hex = self.read(candidate)
-                    candidate_digest = hashlib.sha256(bytes.fromhex(candidate_hex)).hexdigest()[:12]
-                    if candidate_digest == digest:
-                        existing = candidate
-                        break
-                except (OSError, ValueError):
-                    continue
-        if existing:
-            return SavedReplay(existing, False)
+        with self._save_lock:
+            existing = self._find_duplicate(replay_hex, digest)
+            if existing:
+                return SavedReplay(existing, False)
 
-        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        path = self.directory / f"{stamp}_{digest}.replay"
-        suffix = 2
-        while path.exists():
-            path = self.directory / f"{stamp}_{suffix}_{digest}.replay"
-            suffix += 1
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(replay_hex, encoding="ascii")
-        temporary.replace(path)
-        return SavedReplay(path, True)
+            stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            path = self.directory / f"{stamp}_{digest}.replay"
+            suffix = 2
+            while path.exists():
+                path = self.directory / f"{stamp}_{suffix}_{digest}.replay"
+                suffix += 1
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(replay_hex, encoding="ascii")
+            temporary.replace(path)
+            return SavedReplay(path, True)

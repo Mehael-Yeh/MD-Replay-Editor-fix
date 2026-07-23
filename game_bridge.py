@@ -70,6 +70,7 @@ class ReplayManager:
         self.override_armed = False
         self.direct_pending = False
         self.direct_fallback = False
+        self.pending_replacement: Optional[Path] = None
         self.saved = 0
         self.game_version: Optional[str] = None
         self._lock = threading.RLock()
@@ -131,6 +132,23 @@ class ReplayManager:
         if event_type == "log":
             self.emit("log", self.localize_agent_message(data, "代理发生未知错误"))
             return
+        if event_type == "replay_replacement_applied":
+            with self._lock:
+                selected = self.pending_replacement
+                self.pending_replacement = None
+            if selected:
+                self.emit("loaded", selected)
+            return
+        if event_type in {"replay_replacement_rejected", "replay_replacement_blocked"}:
+            details = data if isinstance(data, dict) else {}
+            with self._lock:
+                self.pending_replacement = None
+            error = details.get("error") or details.get("reason") or self.tr("游戏拒绝了本地回放")
+            self.emit(
+                "error",
+                self.tr("游戏拒绝了本地回放，已保留官方数据：{error}", error=error),
+            )
+            return
         if event_type in {
             "direct_play_queued",
             "direct_play_started",
@@ -169,20 +187,24 @@ class ReplayManager:
             return
 
         original = data.get("hex", "")
+        replacement_allowed = data.get("replacementAllowed") is True
         reply = original
         try:
             validate_replay_hex(original, self.tr)
             with self._lock:
                 selected = self.selected
                 armed = self.override_armed
-                if armed:
+                if armed and replacement_allowed:
                     self.override_armed = False
                     self.direct_pending = False
                     self.direct_fallback = False
 
-            if armed and selected:
+            if armed and selected and replacement_allowed:
                 reply = self.store.read(selected)
-                self.emit("loaded", selected)
+                with self._lock:
+                    self.pending_replacement = selected
+            elif not replacement_allowed:
+                self.emit("non_replay_packet_ignored", data.get("byteLength"))
             else:
                 saved = self.store.save(original)
                 if saved.created:
@@ -208,6 +230,7 @@ class ReplayManager:
             self.override_armed = False
             self.direct_pending = False
             self.direct_fallback = False
+            self.pending_replacement = None
         detail = f"{reason}"
         if crash:
             detail += f" ({crash})"
@@ -310,6 +333,7 @@ class ReplayManager:
             self.override_armed = False
             self.direct_pending = False
             self.direct_fallback = False
+            self.pending_replacement = None
         if was_direct and script is not None:
             try:
                 script.post({"type": "cancel_direct_play"})
@@ -331,6 +355,7 @@ class ReplayManager:
             self.override_armed = False
             self.direct_pending = False
             self.direct_fallback = False
+            self.pending_replacement = None
         try:
             if script:
                 script.unload()
