@@ -189,6 +189,11 @@ class ReplayManagerTests(unittest.TestCase):
             'Process.getModuleByName("user32.dll")',
             agent_source,
         )
+        self.assertIn(
+            '.assembly("UnityEngine.CoreModule")',
+            agent_source,
+        )
+        self.assertIn('method.name === "Quit"', agent_source)
 
     def test_game_close_detaches_before_forwarding_window_message(self):
         with tempfile.TemporaryDirectory() as tmp:
