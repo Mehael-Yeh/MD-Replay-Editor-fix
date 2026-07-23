@@ -119,6 +119,11 @@ Il2Cpp.perform(() => {
     const urlOpen = urlSchemeClass?.tryMethod("Open", 3);
     const directPlayAvailable = Boolean(managerClass && urlSchemeClass && homeUpdate);
     const user32 = Process.getModuleByName("user32.dll");
+    const getForegroundWindow = new NativeFunction(
+        user32.getExportByName("GetForegroundWindow"),
+        "pointer",
+        []
+    );
 
     function isGameCloseMessage(message: number, wParam: NativePointer): boolean {
         return (
@@ -199,6 +204,34 @@ Il2Cpp.perform(() => {
     attachCloseMessageInterceptor("CallWindowProcW", 1, 2, 3);
     attachCloseMessageInterceptor("SendMessageW", 0, 1, 2);
     attachCloseMessageInterceptor("SendMessageTimeoutW", 0, 1, 2);
+
+    try {
+        const applicationClass = Il2Cpp.domain
+            .assembly("UnityEngine.CoreModule")
+            .image.class("UnityEngine.Application");
+        const quitMethods = applicationClass.methods.filter(
+            method => method.name === "Quit"
+        );
+        if (quitMethods.length === 0) {
+            throw new Error("UnityEngine.Application.Quit was not found");
+        }
+        for (const method of quitMethods) {
+            const quitMethod = method as Il2Cpp.Method<void>;
+            quitMethod.implementation = function () {
+                suppressGameClose(
+                    getForegroundWindow() as NativePointer,
+                    WM_CLOSE,
+                    ptr(0),
+                    () => {}
+                );
+            };
+        }
+    } catch (error) {
+        emit("log", {
+            message: "agent.game_quit_intercept_failed",
+            error: String(error)
+        });
+    }
 
     function topViewControllerName(): string | null {
         if (!managerClass) {
