@@ -1450,6 +1450,14 @@ class ReplayApp:
                     self.set_status("本地回放已送入游戏", "本次播放已替换；程序现在自动恢复保存模式。", self.GREEN)
                     self.append_log(self.tr("已加载 {name}", name=Path(data).name))
                     self.update_action_states()
+                elif kind == "game_closing":
+                    self.set_status(
+                        "Master Duel 正在退出",
+                        "已先安全断开回放组件，再将关闭请求交还游戏。",
+                        self.BLUE,
+                    )
+                    self.set_attach_button("正在安全断开…", self.tk.DISABLED)
+                    self.append_log(self.tr("检测到游戏关闭请求，正在安全断开"))
                 elif kind == "detached":
                     self.set_status("游戏连接已断开", "如果游戏仍在运行，请点击按钮重新连接。", self.AMBER)
                     self.set_attach_button("1. 重新启动并连接", self.tk.NORMAL)

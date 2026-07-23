@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import time
+import ctypes
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -18,6 +19,12 @@ READY_TIMEOUT_SECONDS = 20
 GAME_LAUNCH_TIMEOUT_SECONDS = 180
 GAME_PROCESS_NAMES = frozenset({"masterduel.exe", "masterduel"})
 MASTER_DUEL_STEAM_URI = "steam://rungameid/1449850"
+WM_CLOSE = 0x0010
+WM_SYSCOMMAND = 0x0112
+SC_CLOSE = 0xF060
+SMTO_BLOCK = 0x0001
+SMTO_ABORTIFHUNG = 0x0002
+GAME_CLOSE_FORWARD_TIMEOUT_MS = 5000
 
 
 def resource_path(*parts: str) -> Path:
@@ -71,6 +78,8 @@ class ReplayManager:
         self.direct_pending = False
         self.direct_fallback = False
         self.pending_replacement: Optional[Path] = None
+        self.process_pid: Optional[int] = None
+        self._close_forwarding = False
         self.saved = 0
         self.game_version: Optional[str] = None
         self._lock = threading.RLock()
@@ -131,6 +140,38 @@ class ReplayManager:
             return
         if event_type == "log":
             self.emit("log", self.localize_agent_message(data, "代理发生未知错误"))
+            return
+        if event_type == "game_close_requested":
+            details = data if isinstance(data, dict) else {}
+            hwnd_text = str(details.get("hwnd") or "")
+            message_text = str(details.get("message") or "")
+            wparam_text = str(details.get("wParam") or "")
+            try:
+                hwnd = int(hwnd_text, 0)
+                close_message = int(message_text, 0)
+                close_wparam = int(wparam_text, 0)
+            except ValueError:
+                self.emit("error", self.tr("游戏关闭请求包含无效窗口句柄"))
+                return
+            if not (
+                close_message == WM_CLOSE
+                or (
+                    close_message == WM_SYSCOMMAND
+                    and close_wparam & 0xFFF0 == SC_CLOSE
+                )
+            ):
+                self.emit("error", self.tr("已阻止无效的游戏关闭消息"))
+                return
+            with self._lock:
+                if self._close_forwarding:
+                    return
+                self._close_forwarding = True
+            threading.Thread(
+                target=self._detach_and_forward_game_close,
+                args=(hwnd, close_message, close_wparam),
+                name="master-duel-close-forwarder",
+                daemon=True,
+            ).start()
             return
         if event_type == "replay_replacement_applied":
             with self._lock:
@@ -231,6 +272,8 @@ class ReplayManager:
             self.direct_pending = False
             self.direct_fallback = False
             self.pending_replacement = None
+            self.process_pid = None
+            self._close_forwarding = False
         detail = f"{reason}"
         if crash:
             detail += f" ({crash})"
@@ -279,6 +322,7 @@ class ReplayManager:
             with self._lock:
                 self.session = session
                 self.script = script
+                self.process_pid = process.pid
             script.load()
             if not self._ready_event.wait(READY_TIMEOUT_SECONDS):
                 raise RuntimeError(self.tr("代理在 {seconds} 秒内没有就绪", seconds=READY_TIMEOUT_SECONDS))
@@ -347,6 +391,48 @@ class ReplayManager:
             if self.selected == old_path:
                 self.selected = new_path
 
+    def _detach_and_forward_game_close(
+        self,
+        hwnd: int,
+        close_message: int = WM_CLOSE,
+        close_wparam: int = 0,
+    ) -> None:
+        with self._lock:
+            process_pid = self.process_pid
+        try:
+            if os.name != "nt" or process_pid is None:
+                self.detach()
+                return
+
+            user32 = ctypes.windll.user32
+            window_pid = ctypes.c_ulong()
+            user32.GetWindowThreadProcessId(
+                ctypes.c_void_p(hwnd),
+                ctypes.byref(window_pid),
+            )
+            if window_pid.value != process_pid:
+                self.emit("error", self.tr("已阻止来源不明的游戏关闭请求"))
+                return
+
+            self.emit("game_closing", {"pid": process_pid})
+            self.cancel_override(False)
+            self.detach()
+            time.sleep(0.2)
+            message_result = ctypes.c_size_t()
+            if not user32.SendMessageTimeoutW(
+                ctypes.c_void_p(hwnd),
+                close_message,
+                close_wparam,
+                0,
+                SMTO_BLOCK | SMTO_ABORTIFHUNG,
+                GAME_CLOSE_FORWARD_TIMEOUT_MS,
+                ctypes.byref(message_result),
+            ):
+                self.emit("error", self.tr("重新发送游戏关闭请求失败"))
+        finally:
+            with self._lock:
+                self._close_forwarding = False
+
     def detach(self) -> None:
         with self._lock:
             script, session = self.script, self.session
@@ -356,6 +442,7 @@ class ReplayManager:
             self.direct_pending = False
             self.direct_fallback = False
             self.pending_replacement = None
+            self.process_pid = None
         try:
             if script:
                 script.unload()

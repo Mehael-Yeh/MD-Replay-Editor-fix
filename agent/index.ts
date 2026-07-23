@@ -6,6 +6,10 @@ const DIRECT_PLAY_TIMEOUT_MS = 60000;
 const HOME_STABLE_MS = 3000;
 const NETWORK_QUIET_MS = 4000;
 const REPLAY_ROUTE_TIMEOUT_MS = 60000;
+const WM_NULL = 0x0000;
+const WM_CLOSE = 0x0010;
+const WM_SYSCOMMAND = 0x0112;
+const SC_CLOSE = 0xf060;
 
 type DirectPlayStage = "idle" | "queued" | "waiting_packet";
 
@@ -17,6 +21,7 @@ let homeTransitioning = false;
 let homeStableSince = 0;
 let networkQuietUntil = 0;
 let replayRouteDeadline = 0;
+let gameClosePending = false;
 
 function emit(type: string, data: unknown = null): void {
     send({ type, data });
@@ -113,6 +118,86 @@ Il2Cpp.perform(() => {
     const requestEntry = requestClass?.tryMethod("Entry", 3);
     const urlOpen = urlSchemeClass?.tryMethod("Open", 3);
     const directPlayAvailable = Boolean(managerClass && urlSchemeClass && homeUpdate);
+
+    function isGameCloseMessage(message: number, wParam: NativePointer): boolean {
+        return (
+            message === WM_CLOSE ||
+            (message === WM_SYSCOMMAND &&
+                (wParam.toUInt32() & 0xfff0) === SC_CLOSE)
+        );
+    }
+
+    function suppressGameClose(
+        hwnd: NativePointer,
+        message: number,
+        wParam: NativePointer,
+        replaceMessage: () => void
+    ): void {
+        if (gameClosePending || !isGameCloseMessage(message, wParam)) {
+            return;
+        }
+        replaceMessage();
+        gameClosePending = true;
+        emit("game_close_requested", {
+            hwnd: hwnd.toString(),
+            message,
+            wParam: wParam.toString()
+        });
+    }
+
+    Interceptor.attach(Module.getExportByName("user32.dll", "DispatchMessageW"), {
+        onEnter(args) {
+            if (gameClosePending || args[0].isNull()) {
+                return;
+            }
+            try {
+                const messagePointer = args[0].add(Process.pointerSize);
+                const message = messagePointer.readU32();
+                const hwnd = args[0].readPointer();
+                const wParam = args[0].add(Process.pointerSize * 2).readPointer();
+                suppressGameClose(hwnd, message, wParam, () => {
+                    messagePointer.writeU32(WM_NULL);
+                });
+            } catch (error) {
+                emit("log", {
+                    message: "agent.game_close_intercept_failed",
+                    error: String(error)
+                });
+            }
+        }
+    });
+
+    function attachCloseMessageInterceptor(
+        exportName: string,
+        hwndIndex: number,
+        messageIndex: number,
+        wParamIndex: number
+    ): void {
+        Interceptor.attach(Module.getExportByName("user32.dll", exportName), {
+            onEnter(args) {
+                try {
+                    suppressGameClose(
+                        args[hwndIndex],
+                        args[messageIndex].toInt32(),
+                        args[wParamIndex],
+                        () => {
+                            args[messageIndex] = ptr(WM_NULL);
+                        }
+                    );
+                } catch (error) {
+                    emit("log", {
+                        message: "agent.game_close_intercept_failed",
+                        error: `${exportName}: ${error}`
+                    });
+                }
+            }
+        });
+    }
+
+    attachCloseMessageInterceptor("DefWindowProcW", 0, 1, 2);
+    attachCloseMessageInterceptor("CallWindowProcW", 1, 2, 3);
+    attachCloseMessageInterceptor("SendMessageW", 0, 1, 2);
+    attachCloseMessageInterceptor("SendMessageTimeoutW", 0, 1, 2);
 
     function topViewControllerName(): string | null {
         if (!managerClass) {

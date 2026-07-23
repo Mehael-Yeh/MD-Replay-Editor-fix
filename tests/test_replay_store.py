@@ -2,9 +2,10 @@ import hashlib
 import tempfile
 import unittest
 import os
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from main import (
     MASTER_DUEL_STEAM_URI,
@@ -178,6 +179,88 @@ class ReplayMarkerTests(unittest.TestCase):
 
 
 class ReplayManagerTests(unittest.TestCase):
+    def test_game_close_detaches_before_forwarding_window_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            events = []
+            manager = ReplayManager(
+                ReplayStore(Path(tmp)),
+                lambda kind, data=None: events.append((kind, data)),
+            )
+            manager.process_pid = 1234
+            manager.detach = Mock()
+            manager.cancel_override = Mock()
+
+            class FakeUser32:
+                def __init__(self):
+                    self.forwarded = []
+
+                def GetWindowThreadProcessId(self, _hwnd, pid_pointer):
+                    pid_pointer._obj.value = 1234
+                    return 1
+
+                def SendMessageTimeoutW(
+                    self,
+                    hwnd,
+                    message,
+                    wparam,
+                    lparam,
+                    flags,
+                    timeout,
+                    result_pointer,
+                ):
+                    result_pointer._obj.value = 1
+                    self.forwarded.append(
+                        (hwnd.value, message, wparam, lparam, flags, timeout)
+                    )
+                    return 1
+
+            fake_user32 = FakeUser32()
+            with patch.object(
+                __import__("game_bridge").ctypes,
+                "windll",
+                SimpleNamespace(user32=fake_user32),
+            ):
+                with patch("game_bridge.time.sleep"):
+                    manager._detach_and_forward_game_close(
+                        0x123456,
+                        0x0112,
+                        0xF060,
+                    )
+
+            manager.cancel_override.assert_called_once_with(False)
+            manager.detach.assert_called_once_with()
+            self.assertEqual(
+                fake_user32.forwarded,
+                [(0x123456, 0x0112, 0xF060, 0, 0x0003, 5000)],
+            )
+            self.assertEqual(events[-1], ("game_closing", {"pid": 1234}))
+
+    def test_game_close_rejects_window_from_another_process(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            events = []
+            manager = ReplayManager(
+                ReplayStore(Path(tmp)),
+                lambda kind, data=None: events.append((kind, data)),
+            )
+            manager.process_pid = 1234
+            manager.detach = Mock()
+
+            class FakeUser32:
+                @staticmethod
+                def GetWindowThreadProcessId(_hwnd, pid_pointer):
+                    pid_pointer._obj.value = 9999
+                    return 1
+
+            with patch.object(
+                __import__("game_bridge").ctypes,
+                "windll",
+                SimpleNamespace(user32=FakeUser32()),
+            ):
+                manager._detach_and_forward_game_close(0x123456)
+
+            manager.detach.assert_not_called()
+            self.assertEqual(events[-1][0], "error")
+
     def test_ready_message_records_game_version(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = ReplayManager(ReplayStore(Path(tmp)))
