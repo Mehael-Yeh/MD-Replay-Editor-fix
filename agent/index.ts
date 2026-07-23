@@ -118,6 +118,7 @@ Il2Cpp.perform(() => {
     const requestEntry = requestClass?.tryMethod("Entry", 3);
     const urlOpen = urlSchemeClass?.tryMethod("Open", 3);
     const directPlayAvailable = Boolean(managerClass && urlSchemeClass && homeUpdate);
+    const user32 = Process.getModuleByName("user32.dll");
 
     function isGameCloseMessage(message: number, wParam: NativePointer): boolean {
         return (
@@ -145,7 +146,7 @@ Il2Cpp.perform(() => {
         });
     }
 
-    Interceptor.attach(Module.getExportByName("user32.dll", "DispatchMessageW"), {
+    Interceptor.attach(user32.getExportByName("DispatchMessageW"), {
         onEnter(args) {
             if (gameClosePending || args[0].isNull()) {
                 return;
@@ -173,7 +174,7 @@ Il2Cpp.perform(() => {
         messageIndex: number,
         wParamIndex: number
     ): void {
-        Interceptor.attach(Module.getExportByName("user32.dll", exportName), {
+        Interceptor.attach(user32.getExportByName(exportName), {
             onEnter(args) {
                 try {
                     suppressGameClose(

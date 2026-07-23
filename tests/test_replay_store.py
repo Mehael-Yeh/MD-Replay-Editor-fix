@@ -179,6 +179,17 @@ class ReplayMarkerTests(unittest.TestCase):
 
 
 class ReplayManagerTests(unittest.TestCase):
+    def test_agent_uses_frida_17_module_export_api(self):
+        agent_source = (
+            Path(__file__).resolve().parents[1] / "agent" / "index.ts"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("Module.getExportByName(", agent_source)
+        self.assertIn(
+            'Process.getModuleByName("user32.dll")',
+            agent_source,
+        )
+
     def test_game_close_detaches_before_forwarding_window_message(self):
         with tempfile.TemporaryDirectory() as tmp:
             events = []
