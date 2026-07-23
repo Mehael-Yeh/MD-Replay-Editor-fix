@@ -1,6 +1,8 @@
+import hashlib
 import tempfile
 import unittest
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +12,7 @@ from main import (
     ReplayStore,
     find_master_duel_process,
     launch_master_duel,
+    replay_marker_pixels,
     validate_replay_hex,
     wait_for_master_duel_process,
 )
@@ -38,6 +41,41 @@ class ReplayStoreTests(unittest.TestCase):
             self.assertFalse(second.created)
             self.assertEqual(first.path, second.path)
             self.assertEqual(store.read(first.path), VALID)
+
+    def test_save_deduplicates_normalized_legacy_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ReplayStore(Path(tmp))
+            legacy = Path(tmp) / "自定义名称.replay"
+            legacy.write_text(f"  {VALID[:10].upper()}\n{VALID[10:]}  ", encoding="ascii")
+
+            saved = store.save(VALID)
+
+            self.assertFalse(saved.created)
+            self.assertEqual(saved.path, legacy)
+            self.assertEqual(len(store.list()), 1)
+
+    def test_digest_in_filename_does_not_skip_full_content_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ReplayStore(Path(tmp))
+            digest = hashlib.sha256(bytes.fromhex(VALID)).hexdigest()[:12]
+            misleading = Path(tmp) / f"misleading_{digest}.replay"
+            misleading.write_text((b"\x02replaym-other").hex(), encoding="ascii")
+
+            saved = store.save(VALID)
+
+            self.assertTrue(saved.created)
+            self.assertNotEqual(saved.path, misleading)
+            self.assertEqual(len(store.list()), 2)
+
+    def test_concurrent_saves_create_only_one_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ReplayStore(Path(tmp))
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                results = list(executor.map(store.save, [VALID] * 16))
+
+            self.assertEqual(sum(result.created for result in results), 1)
+            self.assertEqual(len({result.path for result in results}), 1)
+            self.assertEqual(len(store.list()), 1)
 
     def test_list_is_newest_first(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -126,6 +164,19 @@ class GameLaunchTests(unittest.TestCase):
             launch_master_duel()
         startfile.assert_called_once_with(MASTER_DUEL_STEAM_URI)
 
+
+class ReplayMarkerTests(unittest.TestCase):
+    def test_marker_has_padding_symmetry_and_complete_tip(self):
+        pixels = replay_marker_pixels()
+        self.assertEqual(min(x for x, _ in pixels), 4)
+        self.assertEqual(max(x for x, _ in pixels), 13)
+        self.assertEqual(min(y for _, y in pixels), 3)
+        self.assertEqual(max(y for _, y in pixels), 13)
+        self.assertEqual({y for x, y in pixels if x == 13}, {8})
+        for x, y in pixels:
+            self.assertIn((x, 16 - y), pixels)
+
+
 class ReplayManagerTests(unittest.TestCase):
     def test_ready_message_records_game_version(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -160,7 +211,13 @@ class ReplayManagerTests(unittest.TestCase):
             manager = ReplayManager(ReplayStore(Path(tmp)), lambda kind, data=None: events.append((kind, data)))
             manager.script = FakeScript()
             manager._on_message(
-                {"type": "send", "payload": {"type": "replay_packet", "data": {"hex": VALID}}},
+                {
+                    "type": "send",
+                    "payload": {
+                        "type": "replay_packet",
+                        "data": {"hex": VALID, "replacementAllowed": True},
+                    },
+                },
                 None,
             )
             self.assertEqual(manager.script.messages[-1]["replay"], VALID)
@@ -178,13 +235,80 @@ class ReplayManagerTests(unittest.TestCase):
             manager.attached = True
             manager.arm_override(selected)
             manager._on_message(
-                {"type": "send", "payload": {"type": "replay_packet", "data": {"hex": carrier}}},
+                {
+                    "type": "send",
+                    "payload": {
+                        "type": "replay_packet",
+                        "data": {"hex": carrier, "replacementAllowed": True},
+                    },
+                },
                 None,
             )
             self.assertEqual(manager.script.messages[-1]["replay"], VALID)
             self.assertFalse(manager.override_armed)
             self.assertEqual(len(store.list()), 1)
+            self.assertNotIn(("loaded", selected), events)
+
+            manager._on_message(
+                {"type": "send", "payload": {"type": "replay_replacement_applied"}},
+                None,
+            )
             self.assertEqual(events[-1], ("loaded", selected))
+
+    def test_armed_override_ignores_live_duel_packet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            events = []
+            store = ReplayStore(Path(tmp))
+            selected = store.save(VALID).path
+            live_duel = (b"\x04replaym-live-duel").hex()
+            manager = ReplayManager(store, lambda kind, data=None: events.append((kind, data)))
+            manager.script = FakeScript()
+            manager.attached = True
+            manager.arm_override(selected)
+
+            manager._on_message(
+                {
+                    "type": "send",
+                    "payload": {
+                        "type": "replay_packet",
+                        "data": {
+                            "hex": live_duel,
+                            "byteLength": len(bytes.fromhex(live_duel)),
+                            "replacementAllowed": False,
+                        },
+                    },
+                },
+                None,
+            )
+
+            self.assertEqual(manager.script.messages[-1]["replay"], live_duel)
+            self.assertTrue(manager.override_armed)
+            self.assertEqual(len(store.list()), 1)
+            self.assertEqual(events[-1][0], "non_replay_packet_ignored")
+
+    def test_rejected_replacement_reports_error_without_loaded_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            events = []
+            store = ReplayStore(Path(tmp))
+            selected = store.save(VALID).path
+            manager = ReplayManager(store, lambda kind, data=None: events.append((kind, data)))
+            manager.pending_replacement = selected
+
+            manager._on_message(
+                {
+                    "type": "send",
+                    "payload": {
+                        "type": "replay_replacement_rejected",
+                        "data": {"error": "system error"},
+                    },
+                },
+                None,
+            )
+
+            self.assertIsNone(manager.pending_replacement)
+            self.assertEqual(events[-1][0], "error")
+            self.assertIn("system error", events[-1][1])
+            self.assertNotIn(("loaded", selected), events)
 
     def test_direct_play_request_arms_override_and_posts_agent_command(self):
         with tempfile.TemporaryDirectory() as tmp:

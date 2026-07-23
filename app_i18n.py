@@ -11,6 +11,8 @@ LANGUAGE_NAMES = {"zh-CN": "中文", "en": "English"}
 AGENT_MESSAGE_TEMPLATES = {
     "agent.game_version_read_failed": "无法读取游戏版本：{error}",
     "agent.replay_processing_failed": "回放数据处理失败，使用游戏原响应：{error}",
+    "agent.deserialize_failed": "游戏处理官方数据失败：{error}",
+    "agent.deserialize_fallback_failed": "本地回放失败后，恢复官方数据也失败：{error}",
     "agent.il2cpp_initialization_failed": "IL2CPP 初始化失败：{error}",
 }
 
@@ -27,6 +29,8 @@ ENGLISH_TRANSLATIONS = {
     "代理初始化失败": "Agent initialization failed.",
     "无法读取游戏版本：{error}": "Failed to read the game version: {error}",
     "回放数据处理失败，使用游戏原响应：{error}": "Replay processing failed; using the original game response: {error}",
+    "游戏处理官方数据失败：{error}": "The game failed to process the official data: {error}",
+    "本地回放失败后，恢复官方数据也失败：{error}": "The local replay failed, and restoring the official data also failed: {error}",
     "IL2CPP 初始化失败：{error}": "IL2CPP initialization failed: {error}",
     "处理回放失败：{error}": "Failed to process replay: {error}",
     "代理启动期间连接断开：{reason}": "The connection was lost while the agent was starting: {reason}",
@@ -134,7 +138,7 @@ ENGLISH_TRANSLATIONS = {
     "程序不会重复保存，因此不会浪费磁盘空间。": "Duplicate replays are skipped to avoid wasting disk space.",
     "跳过重复文件 {name}": "Skipped duplicate file {name}",
     "本地回放已经准备好": "Local Replay Ready",
-    "现在回到游戏，播放任意一条可用回放。": "Return to the game and play any available replay.",
+    "现在回到游戏，播放任意一条可用的官方回放。": "Return to the game and play any available official replay.",
     "下一次播放将使用 {name}": "The next playback will use {name}",
     "已取消回放": "Replay Cancelled",
     "不会再替换下一条游戏回放，自动保存仍在运行。": "The next replay will not be replaced; auto-save is still running.",
@@ -181,13 +185,15 @@ ENGLISH_TRANSLATIONS.update({
     "已触发官方回放入口": "Triggered the official replay entry point",
     "已收到直接播放载体数据": "Received the direct-play carrier data",
     "当前不在首页，已改为下一条播放": "Not on Home; Switched to Play Next",
-    "回到游戏播放任意可用回放即可。": "Return to the game and play any available replay.",
+    "回到游戏播放任意可用的官方回放即可；真实对战不会被替换。": "Return to the game and play any available official replay; live duels will never be replaced.",
     "非首页待机，下一次播放将使用 {name}": "Not idle on Home; the next playback will use {name}",
     "只能在首页直接播放": "Direct Playback Requires Home",
     "当前界面：{view}。请回到首页后重试。": "Current screen: {view}. Return to Home and try again.",
     "未知": "Unknown",
     "直接播放被界面门禁阻止：{view}": "Direct playback was blocked by screen state: {view}",
     "直接播放失败：{error}": "Direct playback failed: {error}",
+    "游戏拒绝了本地回放": "The game rejected the local replay.",
+    "游戏拒绝了本地回放，已保留官方数据：{error}": "The game rejected the local replay; the official data was preserved: {error}",
 })
 
 def translate(language: str, text: str, **values: object) -> str:
