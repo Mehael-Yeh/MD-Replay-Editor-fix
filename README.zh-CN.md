@@ -27,6 +27,10 @@
 本地文件只替换下一次回放响应，触发后会自动恢复保存模式，不会永久修改游戏文件或服务器数据。
 “下一条播放”只识别官方回放入口；排名、休闲、活动等真实对战的 `Duel.begin` 数据始终原样放行。
 
+## Interface Preview / 界面展示
+
+![中文界面](assets/UI_CN.png)
+
 ## 主要功能
 
 - 单 EXE 图形界面，无需安装 Python、Node.js 或 Frida。
@@ -84,7 +88,3 @@ pyinstaller --noconfirm --clean --onefile --windowed `
 ## 许可证
 
 项目代码采用 [MIT License](LICENSE)。第三方组件及原项目的版权与许可信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-## Interface Preview / 界面展示
-
-![中文界面](assets/UI_CN.png)
