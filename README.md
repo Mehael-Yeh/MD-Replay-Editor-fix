@@ -29,6 +29,10 @@ The project also draws on [pixeltris/YgoMaster](https://github.com/pixeltris/Ygo
 The local file replaces only the next replay response. After it is triggered, the program automatically returns to save mode. It does not permanently modify game files or server data.
 Play Next recognizes official replay routes only. Live Ranked, Casual, and Event Duel `Duel.begin` data always passes through unchanged.
 
+## Interface Preview
+
+![English interface](assets/UI_EN.png)
+
 ## Features
 
 - Single-EXE graphical interface with no need to install Python, Node.js, or Frida.

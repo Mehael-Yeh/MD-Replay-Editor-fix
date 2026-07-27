@@ -84,3 +84,7 @@ pyinstaller --noconfirm --clean --onefile --windowed `
 ## 许可证
 
 项目代码采用 [MIT License](LICENSE)。第三方组件及原项目的版权与许可信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## Interface Preview / 界面展示
+
+![中文界面](assets/UI_CN.png)
