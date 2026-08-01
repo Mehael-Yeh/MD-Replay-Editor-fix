@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Synchronize application version
+      - name: Synchronize application and compatibility versions
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version != '')
         env:
           RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
