@@ -20,6 +20,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Synchronize application version
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.version != '')
+        env:
+          RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: python scripts/set_app_version.py "$env:RELEASE_VERSION"
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -33,11 +44,6 @@ jobs:
           npm ci
           npm run build
           if (-not (Test-Path _.js)) { throw "agent/_.js was not created" }
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
 
       - name: Install Python dependencies
         run: python -m pip install -r requirements.txt
@@ -55,6 +61,25 @@ jobs:
             --collect-all frida `
             main.py
           if (-not (Test-Path dist\MD-Replay-Editor-fix.exe)) { throw "EXE was not created" }
+
+      - name: Commit synchronized version to source branch
+        id: source_version
+        if: github.event_name == 'workflow_dispatch' && inputs.version != '' && startsWith(github.ref, 'refs/heads/')
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          TARGET_BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- main.py agent/index.ts
+          if (git diff --cached --quiet) {
+            Write-Output "Source files already use $env:RELEASE_VERSION"
+          } else {
+            git commit -m "Set application version to $env:RELEASE_VERSION"
+            git push origin "HEAD:$env:TARGET_BRANCH"
+          }
+          $commitSha = git rev-parse HEAD
+          "commit_sha=$commitSha" >> $env:GITHUB_OUTPUT
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -76,5 +101,6 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.version }}
           name: ${{ github.event.inputs.version }}
+          target_commitish: ${{ steps.source_version.outputs.commit_sha || github.sha }}
           generate_release_notes: true
           files: dist/MD-Replay-Editor-fix.exe
