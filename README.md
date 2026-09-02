@@ -1,6 +1,6 @@
-# MD-Replay-Editor-fix
+# MD-Replay-Editor-fix 游戏王Master Duel回放录像管理器
 
-[English](README.md) | [中文](README.zh-CN.md)
+## [English](README.md) | [中文](README.zh-CN.md)
 
 [![Release](https://img.shields.io/github/v/release/Mehael-Yeh/MD-Replay-Editor-fix?label=Release)](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/Mehael-Yeh/MD-Replay-Editor-fix/total?label=Downloads)](https://github.com/Mehael-Yeh/MD-Replay-Editor-fix/releases)
