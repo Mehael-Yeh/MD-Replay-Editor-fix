@@ -1,7 +1,7 @@
 import re
 import unittest
 
-from scripts.set_app_version import VERSION_PATTERN, game_version_from_release, replace_version
+from scripts.set_app_version import VERSION_PATTERN, replace_version
 
 
 class SetAppVersionTests(unittest.TestCase):
@@ -9,26 +9,14 @@ class SetAppVersionTests(unittest.TestCase):
         self.assertIsNotNone(VERSION_PATTERN.fullmatch("v2.8.0_R1"))
         self.assertIsNone(VERSION_PATTERN.fullmatch("2.8.0_R1"))
 
-    def test_extracts_supported_game_version(self):
-        self.assertEqual(game_version_from_release("v2.8.0_R1"), "2.8.0")
-
     def test_replaces_version_declaration(self):
         pattern = re.compile(r'^(APP_VERSION\s*=\s*)"[^"]+"', re.MULTILINE)
-        source = 'APP_VERSION = "v2.7.0_R5"\nSUPPORTED_GAME_VERSION = "2.7.0"\n'
+        source = 'APP_VERSION = "v2.7.0_R5"\nMINIMUM_GAME_VERSION = "2.8.0"\n'
         updated = replace_version(source, pattern, "v2.8.0_R1")
         self.assertEqual(
             updated,
-            'APP_VERSION = "v2.8.0_R1"\nSUPPORTED_GAME_VERSION = "2.7.0"\n',
+            'APP_VERSION = "v2.8.0_R1"\nMINIMUM_GAME_VERSION = "2.8.0"\n',
         )
-
-    def test_replaces_app_and_supported_game_versions_together(self):
-        source = 'APP_VERSION = "v2.7.0_R5"\nSUPPORTED_GAME_VERSION = "2.7.0"\n'
-        app_pattern = re.compile(r'^(APP_VERSION\s*=\s*)"[^"]+"', re.MULTILINE)
-        game_pattern = re.compile(r'^(SUPPORTED_GAME_VERSION\s*=\s*)"[^"]+"', re.MULTILINE)
-        updated = replace_version(source, app_pattern, "v2.8.0_R1")
-        updated = replace_version(updated, game_pattern, "2.8.0")
-        self.assertIn('APP_VERSION = "v2.8.0_R1"', updated)
-        self.assertIn('SUPPORTED_GAME_VERSION = "2.8.0"', updated)
 
     def test_requires_one_declaration(self):
         pattern = re.compile(r'^(APP_VERSION\s*=\s*)"[^"]+"', re.MULTILINE)

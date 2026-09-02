@@ -46,14 +46,6 @@ def parse_updatediff_version(text: str) -> str:
     return match.group(1)
 
 
-def replace_supported_game_version(text: str, version: str) -> tuple[str, bool]:
-    pattern = r'^(SUPPORTED_GAME_VERSION\s*=\s*)"[^"]+"'
-    updated, count = re.subn(pattern, rf'\1"{version}"', text, count=1, flags=re.MULTILINE)
-    if count != 1:
-        raise ValueError("main.py does not contain one SUPPORTED_GAME_VERSION assignment")
-    return updated, updated != text
-
-
 def fetch_github_file(
     path: str,
     *,
@@ -124,8 +116,6 @@ def write_github_output(name: str, value: str) -> None:
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("upstream/ygomaster.json"))
-    parser.add_argument("--main-file", type=Path, default=Path("main.py"))
-    parser.add_argument("--update-supported-version", action="store_true")
     parser.add_argument("--repository", default=UPSTREAM_REPOSITORY)
     parser.add_argument("--ref", default=UPSTREAM_REF)
     args = parser.parse_args(argv)
@@ -142,25 +132,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(rendered, encoding="utf-8", newline="\n")
 
-    version_changed = False
-    if args.update_supported_version:
-        source = args.main_file.read_text(encoding="utf-8")
-        updated, version_changed = replace_supported_game_version(
-            source, str(snapshot["supported_game_version"])
-        )
-        if version_changed:
-            args.main_file.write_text(updated, encoding="utf-8", newline="\n")
-
-    write_github_output("changed", str(snapshot_changed or version_changed).lower())
+    write_github_output("changed", str(snapshot_changed).lower())
     write_github_output("snapshot_changed", str(snapshot_changed).lower())
-    write_github_output("version_changed", str(version_changed).lower())
     write_github_output("supported_version", str(snapshot["supported_game_version"]))
     write_github_output("unity_version", str(snapshot["unity_player_version"]))
     print(
         "YgoMaster compatibility snapshot: "
         f"game={snapshot['supported_game_version']}, "
         f"unity={snapshot['unity_player_version']}, "
-        f"changed={snapshot_changed or version_changed}"
+        f"changed={snapshot_changed}"
     )
     return 0
 

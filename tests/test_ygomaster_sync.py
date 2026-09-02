@@ -4,7 +4,6 @@ from scripts.sync_ygomaster import (
     make_snapshot,
     parse_client_settings,
     parse_updatediff_version,
-    replace_supported_game_version,
     TRACKED_FILES,
 )
 
@@ -21,15 +20,6 @@ class YgoMasterSyncTests(unittest.TestCase):
 
     def test_parse_updatediff_version(self):
         self.assertEqual(parse_updatediff_version("// Client version 2.8.0\nclass A {}"), "2.8.0")
-
-    def test_replace_supported_version_is_idempotent(self):
-        source = 'APP_VERSION = "v2.7.0_R5"\nSUPPORTED_GAME_VERSION = "2.7.0"\n'
-        updated, changed = replace_supported_game_version(source, "2.8.0")
-        self.assertTrue(changed)
-        self.assertIn('SUPPORTED_GAME_VERSION = "2.8.0"', updated)
-        second, changed_again = replace_supported_game_version(updated, "2.8.0")
-        self.assertFalse(changed_again)
-        self.assertEqual(second, updated)
 
     def test_snapshot_rejects_disagreeing_versions(self):
         contents = {}
