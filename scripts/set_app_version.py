@@ -9,11 +9,6 @@ VERSION_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)_R\d+$")
 VERSION_DECLARATIONS = (
     (Path("main.py"), re.compile(r'^(APP_VERSION\s*=\s*)"[^"]+"', re.MULTILINE), "release"),
     (
-        Path("main.py"),
-        re.compile(r'^(SUPPORTED_GAME_VERSION\s*=\s*)"[^"]+"', re.MULTILINE),
-        "game",
-    ),
-    (
         Path("agent/index.ts"),
         re.compile(r'^(const AGENT_VERSION\s*=\s*)"[^"]+"', re.MULTILINE),
         "release",
@@ -28,13 +23,6 @@ def replace_version(source: str, pattern: re.Pattern[str], version: str) -> str:
     return updated
 
 
-def game_version_from_release(version: str) -> str:
-    match = VERSION_PATTERN.fullmatch(version)
-    if match is None:
-        raise ValueError("invalid release version")
-    return ".".join(match.groups())
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Set the application version before packaging")
     parser.add_argument("version", help="release tag, for example v2.8.0_R1")
@@ -46,7 +34,6 @@ def main() -> None:
     repository_root = Path(__file__).resolve().parent.parent
     versions = {
         "release": args.version,
-        "game": game_version_from_release(args.version),
     }
     updates = {}
     for relative_path, pattern, version_kind in VERSION_DECLARATIONS:

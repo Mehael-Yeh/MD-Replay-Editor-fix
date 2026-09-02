@@ -33,8 +33,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python scripts/sync_ygomaster.py \
-            --output upstream/ygomaster.json \
-            --update-supported-version
+            --output upstream/ygomaster.json
 
       - name: Report an incompatible upstream change
         if: steps.sync.outcome == 'failure'
@@ -96,7 +95,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$BRANCH"
-          git add upstream/ygomaster.json main.py
+          git add upstream/ygomaster.json
           git commit -m "Sync YgoMaster compatibility data for Master Duel $VERSION"
           git push --force origin "HEAD:refs/heads/$BRANCH"
 

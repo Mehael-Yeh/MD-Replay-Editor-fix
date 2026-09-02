@@ -7,6 +7,7 @@ import argparse
 import os
 import platform
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -39,9 +40,22 @@ from replay_store import ReplayStore, SavedReplay, validate_replay_hex
 
 APP_NAME = "MD-Replay-Editor-fix"
 APP_VERSION = "v2.8.0_R1"
-SUPPORTED_GAME_VERSION = "2.8.0"
+MINIMUM_GAME_VERSION = "2.8.0"
 GITHUB_URL = "https://github.com/Mehael-Yeh/MD-Replay-Editor-fix"
 GITHUB_ISSUES_URL = f"{GITHUB_URL}/issues/new"
+
+
+def parse_game_version(version: str) -> tuple[int, int, int] | None:
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", version.strip())
+    if match is None:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def is_supported_game_version(version: str) -> bool:
+    detected = parse_game_version(version)
+    minimum = parse_game_version(MINIMUM_GAME_VERSION)
+    return detected is not None and minimum is not None and detected >= minimum
 
 
 def replay_marker_pixels() -> set[tuple[int, int]]:
@@ -839,7 +853,7 @@ class ReplayApp:
     def issue_report_text(self) -> str:
         header = [
             self.tr("程序版本：{version}", version=APP_VERSION),
-            self.tr("适配游戏版本：{version}", version=SUPPORTED_GAME_VERSION),
+            self.tr("最低游戏版本：{version}", version=MINIMUM_GAME_VERSION),
             self.tr(
                 "检测到的游戏版本：{version}",
                 version=self.manager.game_version or self.tr("尚未读取"),
@@ -1337,18 +1351,18 @@ class ReplayApp:
                     details = data if isinstance(data, dict) else {"pid": data, "game_version": None}
                     pid = details.get("pid")
                     game_version = details.get("game_version")
-                    if game_version and game_version != SUPPORTED_GAME_VERSION:
+                    if game_version and not is_supported_game_version(game_version):
                         self.set_status(
                             "游戏版本可能不兼容",
-                            "检测到 Master Duel {game}，本程序适配 {supported}。请前往 GitHub 获取新版。",
+                            "检测到 Master Duel {game}，本程序最低支持 {supported}。请前往 GitHub 获取新版。",
                             self.RED,
-                            detail_values={"game": game_version, "supported": SUPPORTED_GAME_VERSION},
+                            detail_values={"game": game_version, "supported": MINIMUM_GAME_VERSION},
                         )
                         self.append_log(
                             self.tr(
-                                "版本不匹配：游戏 {game}，程序适配 {supported}",
+                                "游戏版本过低或无法识别：游戏 {game}，最低支持 {supported}",
                                 game=game_version,
-                                supported=SUPPORTED_GAME_VERSION,
+                                supported=MINIMUM_GAME_VERSION,
                             )
                         )
                     else:
