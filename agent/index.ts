@@ -1,7 +1,7 @@
 import "frida-il2cpp-bridge";
 
 const REPLAY_MARKER_HEX = "7265706c61796d"; // ASCII: replaym
-const AGENT_VERSION = "v2.8.0_R1";
+const AGENT_VERSION = "v2.8.0_R2";
 const DIRECT_PLAY_TIMEOUT_MS = 60000;
 const HOME_STABLE_MS = 3000;
 const NETWORK_QUIET_MS = 4000;

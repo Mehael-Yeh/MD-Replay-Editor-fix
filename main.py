@@ -39,7 +39,7 @@ from replay_store import ReplayStore, SavedReplay, validate_replay_hex
 
 
 APP_NAME = "MD-Replay-Editor-fix"
-APP_VERSION = "v2.8.0_R1"
+APP_VERSION = "v2.8.0_R2"
 MINIMUM_GAME_VERSION = "2.8.0"
 GITHUB_URL = "https://github.com/Mehael-Yeh/MD-Replay-Editor-fix"
 GITHUB_ISSUES_URL = f"{GITHUB_URL}/issues/new"
