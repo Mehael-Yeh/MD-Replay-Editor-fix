@@ -1,4 +1,5 @@
-# MD-Replay-Editor-fix 游戏王Master Duel回放录像管理器
+# MD-Replay-Editor-fix
+游戏王Master Duel回放录像管理器
 
 ## [English](README.md) | [中文](README.zh-CN.md)
 
