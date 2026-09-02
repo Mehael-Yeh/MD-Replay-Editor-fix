@@ -10,3 +10,6 @@ dist/
 *.spec
 replays/
 settings.json
+
+# Windows thumbnail cache
+Thumbs.db
