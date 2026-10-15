@@ -42,6 +42,10 @@ Play Next recognizes official replay routes only. Live Ranked, Casual, and Event
 - Plays saved local replays immediately from Home, with a safe Play Next fallback elsewhere.
 - Renames and deletes local replay files.
 
+The **Theme** menu offers **System** (default), **Light**, and **Dark**. System mode follows the Windows app color preference and updates while the app is running. Manual choices persist across restarts, independently of language. If the system preference is unavailable, light mode is used.
+
+The replay library scans in the background every 5 seconds; **Refresh** requests an immediate scan. Requests are coalesced and rows are updated in small batches without clearing the selection. A session-local SHA-256 index reads only new or changed replay files after its initial build. Saving reconciles directory metadata and verifies matching content before skipping a duplicate. The index is rebuilt after restarting; no cache files or extra dependencies are required. The first index build still reads the existing library, and each reconciliation still checks file metadata.
+
 ## How It Works
 
 The program injects into `masterduel.exe` through Frida and hooks the IL2CPP method `YgomSystem.Network.FormatYgom.DeserializeAsync`.
@@ -91,3 +95,4 @@ The output file is located at `dist\MD-Replay-Editor-fix.exe`.
 ## License
 
 The project code is licensed under the [MIT License](LICENSE). Copyright and license information for third-party components and the original project can be found in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
