@@ -42,6 +42,8 @@ Play Next recognizes official replay routes only. Live Ranked, Casual, and Event
 - Plays saved local replays immediately from Home, with a safe Play Next fallback elsewhere.
 - Renames and deletes local replay files.
 
+The **Theme** menu offers **System** (default), **Light**, and **Dark**. System mode follows the Windows app color preference and updates while the app is running. Manual choices persist across restarts, independently of language. If the system preference is unavailable, light mode is used.
+
 ## How It Works
 
 The program injects into `masterduel.exe` through Frida and hooks the IL2CPP method `YgomSystem.Network.FormatYgom.DeserializeAsync`.
@@ -91,3 +93,4 @@ The output file is located at `dist\MD-Replay-Editor-fix.exe`.
 ## License
 
 The project code is licensed under the [MIT License](LICENSE). Copyright and license information for third-party components and the original project can be found in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+

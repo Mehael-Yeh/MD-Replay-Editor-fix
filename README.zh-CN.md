@@ -39,6 +39,8 @@
 - 在首页直接播放本地回放，其他界面安全降级为下一条播放。
 - 重命名和删除本地回放文件。
 
+右上角 **主题** 菜单提供 **跟随系统**（默认）、**浅色**、**深色**。跟随系统会读取 Windows 应用颜色设置，并在运行时自动更新；手动选择会保留到下次启动，与语言设置独立保存。无法读取系统设置时使用浅色。
+
 ## 工作原理
 
 程序通过 Frida 注入 `masterduel.exe`，Hook IL2CPP 方法 `YgomSystem.Network.FormatYgom.DeserializeAsync`。
@@ -88,3 +90,4 @@ pyinstaller --noconfirm --clean --onefile --windowed `
 ## 许可证
 
 项目代码采用 [MIT License](LICENSE)。第三方组件及原项目的版权与许可信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+

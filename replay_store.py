@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 import re
 import threading
 from dataclasses import dataclass
@@ -40,7 +42,19 @@ class ReplayStore:
         self.directory.mkdir(parents=True, exist_ok=True)
 
     def list(self) -> list[Path]:
-        return sorted(self.directory.glob("*.replay"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return [path for path, _ in self.list_entries()]
+
+    def list_entries(self) -> list[tuple[Path, os.stat_result]]:
+        """Take one metadata snapshot, tolerating files removed during enumeration."""
+        entries = []
+        for path in self.directory.glob("*.replay"):
+            try:
+                info = path.stat()
+            except OSError:
+                continue
+            if stat.S_ISREG(info.st_mode):
+                entries.append((path, info))
+        return sorted(entries, key=lambda entry: entry[1].st_mtime, reverse=True)
 
     def read(self, path: Path) -> str:
         return validate_replay_hex(path.read_text(encoding="ascii"), self.tr)
@@ -67,7 +81,7 @@ class ReplayStore:
         if name.endswith((".", " ")):
             raise ValueError(self.tr("名称不能以句点或空格结尾"))
         reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
-        if name.upper() in reserved:
+        if name.split(".", 1)[0].rstrip().upper() in reserved:
             raise ValueError(self.tr("这个名称由 Windows 系统保留，请换一个名称"))
 
         target = self.directory / f"{name}.replay"
@@ -112,3 +126,4 @@ class ReplayStore:
             temporary.write_text(replay_hex, encoding="ascii")
             temporary.replace(path)
             return SavedReplay(path, True)
+

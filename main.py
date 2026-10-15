@@ -35,6 +35,7 @@ from game_bridge import (
     launch_master_duel,
     wait_for_master_duel_process,
 )
+from app_theme import DARK, LIGHT, THEME_LABELS, load_theme, save_theme, resolve_theme
 from replay_store import ReplayStore, SavedReplay, validate_replay_hex
 
 
@@ -92,20 +93,6 @@ def default_data_dir() -> Path:
 
 
 class ReplayApp:
-    BG = "#F6F8FC"
-    CARD = "#FFFFFF"
-    TEXT = "#202124"
-    MUTED = "#5F6368"
-    BORDER = "#E1E5EE"
-    BLUE = "#1A73E8"
-    BLUE_HOVER = "#1765CC"
-    GREEN = "#188038"
-    RED = "#D93025"
-    DANGER_BG = "#FCE8E6"
-    DANGER_HOVER = "#F9DEDC"
-    DANGER_TEXT = "#B3261E"
-    AMBER = "#F9AB00"
-
     def __init__(self, data_dir: Path):
         import tkinter as tk
         from tkinter import font as tkfont
@@ -115,6 +102,11 @@ class ReplayApp:
         self.tkfont = tkfont
         self.ttk = ttk
         self.language = load_language(data_dir)
+        self.theme_preference = load_theme(data_dir)
+        self.theme = resolve_theme(self.theme_preference)
+        self.palette = DARK if self.theme == "dark" else LIGHT
+        for role, color in self.palette.items():
+            setattr(self, role, color)
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.store = ReplayStore(data_dir, self.tr)
         self.manager = ReplayManager(
@@ -146,66 +138,7 @@ class ReplayApp:
         root.minsize(880, 600)
         root.configure(bg=self.BG)
 
-        style = ttk.Style(root)
-        style.theme_use("clam")
-        style.configure(
-            "Replay.Treeview",
-            background=self.CARD,
-            fieldbackground=self.CARD,
-            foreground=self.TEXT,
-            rowheight=38,
-            borderwidth=1,
-            bordercolor=self.BORDER,
-            lightcolor=self.BORDER,
-            darkcolor=self.BORDER,
-            focuscolor=self.BORDER,
-            relief="flat",
-            font=("Microsoft YaHei UI", 9),
-        )
-        style.map(
-            "Replay.Treeview",
-            background=[("selected", "#D2E3FC")],
-            foreground=[("selected", self.TEXT)],
-            bordercolor=[("focus", self.BORDER), ("!focus", self.BORDER)],
-            lightcolor=[("focus", self.BORDER), ("!focus", self.BORDER)],
-            darkcolor=[("focus", self.BORDER), ("!focus", self.BORDER)],
-        )
-        style.configure(
-            "Replay.Treeview.Heading",
-            background="#F8FAFD",
-            foreground=self.MUTED,
-            relief="flat",
-            font=("Microsoft YaHei UI", 9, "bold"),
-            padding=(10, 10),
-        )
-        style.layout(
-            "Replay.Vertical.TScrollbar",
-            [
-                (
-                    "Vertical.Scrollbar.trough",
-                    {
-                        "sticky": "ns",
-                        "children": [
-                            ("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"}),
-                        ],
-                    },
-                )
-            ],
-        )
-        style.configure(
-            "Replay.Vertical.TScrollbar",
-            background="#C7CDD8",
-            troughcolor="#F1F3F4",
-            bordercolor="#F1F3F4",
-            lightcolor="#C7CDD8",
-            darkcolor="#C7CDD8",
-            gripcount=0,
-            width=10,
-        )
-        style.map(
-            "Replay.Vertical.TScrollbar",
-            background=[("active", "#9AA4B2"), ("pressed", "#7B8794")],
-        )
+        self.configure_theme_styles()
 
         header = tk.Frame(
             root,
@@ -230,7 +163,7 @@ class ReplayApp:
         tk.Label(
             title_line,
             text=APP_VERSION,
-            bg="#E8F0FE",
+            bg=self.TINT,
             fg=self.BLUE,
             padx=9,
             pady=3,
@@ -246,6 +179,14 @@ class ReplayApp:
         self.subtitle_label.pack(anchor=tk.W, pady=(5, 0))
         header_actions = tk.Frame(header, bg=self.CARD)
         header_actions.pack(side=tk.RIGHT, padx=20, pady=16)
+        self.theme_button = self._header_button(header_actions, self.tr("主题"), self.show_theme_menu)
+        self.theme_button.pack(side=tk.RIGHT, padx=(8, 0))
+        self.theme_choice = tk.StringVar(value=self.theme_preference)
+        self.theme_menu = tk.Menu(root, tearoff=False)
+        for preference, label in THEME_LABELS.items():
+            self.theme_menu.add_radiobutton(label=self.tr(label), value=preference,
+                variable=self.theme_choice, command=self.change_theme)
+        self.style_theme_menu()
         self.language_button = self._header_button(header_actions, self.language_button_text(), self.change_language)
         self.language_button.configure(width=5)
         self.language_button.pack(side=tk.RIGHT)
@@ -371,7 +312,7 @@ class ReplayApp:
             tearoff=False,
             bg=self.CARD,
             fg=self.TEXT,
-            activebackground="#E8F0FE",
+            activebackground=self.TINT,
             activeforeground=self.BLUE,
             relief=tk.FLAT,
             borderwidth=1,
@@ -396,7 +337,7 @@ class ReplayApp:
                 "双击或点击按钮 2：在首页直接播放，否则改为下一条播放。"
                 "右键还可明确选择“下一条播放”或“直接播放”。"
             ),
-            bg="#F8FAFD",
+            bg=self.SURFACE,
             fg=self.MUTED,
             anchor=tk.W,
             justify=tk.LEFT,
@@ -415,6 +356,138 @@ class ReplayApp:
         self.append_log(self.tr("{app} {version} 已启动", app=APP_NAME, version=APP_VERSION))
         self.append_log(self.tr("回放目录：{directory}", directory=self.store.directory))
         root.after(150, self.poll_events)
+        self._theme_job = root.after(2000, self.poll_system_theme)
+
+    def configure_theme_styles(self):
+        style = self.ttk.Style(self.root)
+        style.theme_use("clam")
+        style.configure(
+            "Replay.Treeview",
+            background=self.CARD,
+            fieldbackground=self.CARD,
+            foreground=self.TEXT,
+            rowheight=38,
+            borderwidth=1,
+            bordercolor=self.BORDER,
+            lightcolor=self.BORDER,
+            darkcolor=self.BORDER,
+            focuscolor=self.BORDER,
+            relief="flat",
+            font=("Microsoft YaHei UI", 9),
+        )
+        style.map(
+            "Replay.Treeview",
+            background=[("selected", self.SELECTED)],
+            foreground=[("selected", self.TEXT)],
+            bordercolor=[("focus", self.BORDER), ("!focus", self.BORDER)],
+            lightcolor=[("focus", self.BORDER), ("!focus", self.BORDER)],
+            darkcolor=[("focus", self.BORDER), ("!focus", self.BORDER)],
+        )
+        style.configure(
+            "Replay.Treeview.Heading",
+            background=self.SURFACE,
+            foreground=self.MUTED,
+            relief="flat",
+            font=("Microsoft YaHei UI", 9, "bold"),
+            padding=(10, 10),
+        )
+        style.layout(
+            "Replay.Vertical.TScrollbar",
+            [
+                (
+                    "Vertical.Scrollbar.trough",
+                    {
+                        "sticky": "ns",
+                        "children": [
+                            ("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"}),
+                        ],
+                    },
+                )
+            ],
+        )
+        style.configure(
+            "Replay.Vertical.TScrollbar",
+            background=self.SCROLL,
+            troughcolor=self.TROUGH,
+            bordercolor=self.TROUGH,
+            lightcolor=self.SCROLL,
+            darkcolor=self.SCROLL,
+            gripcount=0,
+            width=10,
+        )
+        style.map(
+            "Replay.Vertical.TScrollbar",
+            background=[("active", self.SCROLL_HOVER), ("pressed", self.SCROLL_PRESSED)],
+        )
+
+        style.map("Replay.Treeview.Heading", background=[("active", self.TINT)])
+
+    def style_theme_menu(self):
+        self.theme_menu.configure(background=self.CARD, foreground=self.TEXT,
+            activebackground=self.TINT, activeforeground=self.BLUE,
+            selectcolor=self.BLUE)
+
+    def show_theme_menu(self):
+        try:
+            self.theme_menu.tk_popup(self.theme_button.winfo_rootx(),
+                self.theme_button.winfo_rooty() + self.theme_button.winfo_height())
+        finally:
+            self.theme_menu.grab_release()
+
+    def change_theme(self):
+        self.theme_preference = self.theme_choice.get()
+        try:
+            save_theme(self.store.directory, self.theme_preference)
+        except OSError as exc:
+            self.append_log(self.tr("错误：{error}", error=exc))
+        self.apply_theme(resolve_theme(self.theme_preference))
+
+    def poll_system_theme(self):
+        if self.theme_preference == "system":
+            self.apply_theme(resolve_theme("system"))
+        self._theme_job = self.root.after(2000, self.poll_system_theme)
+
+    def apply_theme(self, theme):
+        if theme == self.theme:
+            return
+        palette = DARK if theme == "dark" else LIGHT
+        replacements = {color.lower(): palette[role] for role, color in self.palette.items()}
+        self.theme, self.palette = theme, palette
+        for role, color in palette.items():
+            setattr(self, role, color)
+
+        def recolor(widget):
+            options = widget.keys()
+            for option in ("background", "foreground", "activebackground", "activeforeground",
+                           "disabledforeground", "highlightbackground", "highlightcolor",
+                           "insertbackground", "selectbackground", "selectforeground", "selectcolor"):
+                if option in options:
+                    color = str(widget.cget(option)).lower()
+                    if color in replacements:
+                        widget.configure(**{option: replacements[color]})
+            for attribute in ("_normal_bg", "_hover_bg", "_normal_fg"):
+                if hasattr(widget, attribute):
+                    color = getattr(widget, attribute)
+                    setattr(widget, attribute, replacements.get(color.lower(), color))
+            if isinstance(widget, self.tk.Menu):
+                for index in range((widget.index("end") or 0) + 1):
+                    if widget.type(index) in ("separator", "tearoff"):
+                        continue
+                    for option in ("background", "foreground", "activebackground", "activeforeground"):
+                        color = str(widget.entrycget(index, option)).lower()
+                        if color in replacements:
+                            widget.entryconfigure(index, **{option: replacements[color]})
+            for child in widget.winfo_children():
+                recolor(child)
+
+        recolor(self.root)
+        self.configure_theme_styles()
+        self.style_theme_menu()
+        for x, y in replay_marker_pixels():
+            self.armed_replay_marker.put(self.BLUE, (x, y))
+        title, detail, color, title_values, detail_values = self._status_spec
+        self._status_spec = (title, detail, replacements.get(color.lower(), color), title_values, detail_values)
+        self.update_action_states()
 
     def tr(self, text: str, **values: object) -> str:
         return translate(self.language, text, **values)
@@ -431,6 +504,9 @@ class ReplayApp:
         self.apply_language()
 
     def apply_language(self) -> None:
+        self.theme_button.configure(text=self.tr("主题"))
+        for index, label in enumerate(THEME_LABELS.values()):
+            self.theme_menu.entryconfigure(index, label=self.tr(label))
         self.main_title_label.configure(text=self.tr("Master Duel 回放助手"))
         self.subtitle_label.configure(text=self.tr("自动保存看过的回放，也能把本地回放重新放进游戏播放"))
         self.log_button.configure(text=self.tr("运行记录"))
@@ -475,7 +551,7 @@ class ReplayApp:
         if event is not None and event.widget is not self.root:
             return
         width = self.root.winfo_width()
-        self.subtitle_label.configure(wraplength=max(300, min(560, width - 430)), justify=self.tk.LEFT)
+        self.subtitle_label.configure(wraplength=max(240, min(480, width - 510)), justify=self.tk.LEFT)
         self.status_detail_label.configure(wraplength=max(420, width - 150))
         self.tip_label.configure(wraplength=max(420, width - 100))
 
@@ -520,10 +596,10 @@ class ReplayApp:
         outlined: bool = False,
     ):
         bg = self.BLUE if primary else self.CARD
-        fg = "#FFFFFF" if primary else self.BLUE
-        hover = self.BLUE_HOVER if primary else "#E8F0FE"
+        fg = self.ON_ACCENT if primary else self.BLUE
+        hover = self.BLUE_HOVER if primary else self.TINT
         if danger:
-            bg, fg, hover = self.DANGER_TEXT, "#FFFFFF", "#8C1D18"
+            bg, fg, hover = self.DANGER_TEXT, self.ON_ACCENT, self.DANGER_PRESSED
         outline = self.DANGER_TEXT if danger else self.BLUE
         button = self.tk.Button(
             parent,
@@ -533,7 +609,7 @@ class ReplayApp:
             fg=fg,
             activebackground=hover,
             activeforeground=fg,
-            disabledforeground="#A9AFB8",
+            disabledforeground=self.DISABLED,
             relief=self.tk.FLAT,
             borderwidth=0,
             highlightthickness=1 if outlined else 0,
@@ -562,7 +638,7 @@ class ReplayApp:
         if danger:
             bg, fg, hover, outline = self.DANGER_BG, self.DANGER_TEXT, self.DANGER_HOVER, self.DANGER_TEXT
         else:
-            bg, fg, hover, outline = self.CARD, self.BLUE, "#E8F0FE", self.BLUE
+            bg, fg, hover, outline = self.CARD, self.BLUE, self.TINT, self.BLUE
         button._normal_bg = bg
         button._hover_bg = hover
         button._normal_fg = fg
@@ -582,7 +658,7 @@ class ReplayApp:
             command=command,
             bg=self.CARD,
             fg=self.BLUE,
-            activebackground="#E8F0FE",
+            activebackground=self.TINT,
             activeforeground=self.BLUE,
             relief=self.tk.FLAT,
             borderwidth=0,
@@ -591,7 +667,7 @@ class ReplayApp:
             cursor="hand2",
             font=("Microsoft YaHei UI", 9, "bold"),
         )
-        button.bind("<Enter>", lambda _event: button.configure(bg="#E8F0FE"))
+        button.bind("<Enter>", lambda _event: button.configure(bg=self.TINT))
         button.bind("<Leave>", lambda _event: button.configure(bg=self.CARD))
         return button
 
@@ -602,7 +678,7 @@ class ReplayApp:
             command=command,
             bg=self.CARD,
             fg=self.MUTED,
-            activebackground="#E8F0FE",
+            activebackground=self.TINT,
             activeforeground=self.BLUE,
             relief=self.tk.FLAT,
             borderwidth=0,
@@ -611,14 +687,14 @@ class ReplayApp:
             cursor="hand2",
             font=("Microsoft YaHei UI", 9, "bold"),
         )
-        button.bind("<Enter>", lambda _event: button.configure(bg="#E8F0FE", fg=self.BLUE))
+        button.bind("<Enter>", lambda _event: button.configure(bg=self.TINT, fg=self.BLUE))
         button.bind("<Leave>", lambda _event: button.configure(bg=self.CARD, fg=self.MUTED))
         return button
 
     def _step(self, parent, number: str, title: str, detail: str):
         frame = self.tk.Frame(
             parent,
-            bg="#F8FAFD",
+            bg=self.SURFACE,
             padx=16,
             pady=14,
             highlightbackground=self.BORDER,
@@ -629,16 +705,16 @@ class ReplayApp:
             frame,
             text=number,
             bg=self.BLUE,
-            fg="#FFFFFF",
+            fg=self.ON_ACCENT,
             width=2,
             font=("Segoe UI", 9, "bold"),
         ).pack(side=self.tk.LEFT, anchor=self.tk.N, padx=(0, 10))
-        text = self.tk.Frame(frame, bg="#F8FAFD")
+        text = self.tk.Frame(frame, bg=self.SURFACE)
         text.pack(side=self.tk.LEFT, fill=self.tk.X, expand=True)
         self.tk.Label(
             text,
             text=title,
-            bg="#F8FAFD",
+            bg=self.SURFACE,
             fg=self.TEXT,
             anchor=self.tk.W,
             font=("Microsoft YaHei UI", 9, "bold"),
@@ -646,7 +722,7 @@ class ReplayApp:
         self.tk.Label(
             text,
             text=detail,
-            bg="#F8FAFD",
+            bg=self.SURFACE,
             fg=self.MUTED,
             anchor=self.tk.W,
             justify=self.tk.LEFT,
@@ -794,7 +870,7 @@ class ReplayApp:
             log_area,
             state=self.tk.NORMAL,
             bg=self.CARD,
-            fg="#3C4043",
+            fg=self.LOG_TEXT,
             insertbackground=self.TEXT,
             relief=self.tk.FLAT,
             borderwidth=0,
@@ -1038,7 +1114,7 @@ class ReplayApp:
         self.tk.Label(
             heading,
             text="✎",
-            bg="#E8F0FE",
+            bg=self.TINT,
             fg=self.BLUE,
             width=3,
             height=1,
@@ -1087,7 +1163,7 @@ class ReplayApp:
             bg=self.CARD,
             fg=self.TEXT,
             insertbackground=self.BLUE,
-            selectbackground="#D2E3FC",
+            selectbackground=self.SELECTED,
             selectforeground=self.TEXT,
             relief=self.tk.FLAT,
             borderwidth=0,
@@ -1259,7 +1335,7 @@ class ReplayApp:
         ).pack(fill=self.tk.X, pady=(20, 7))
         file_surface = self.tk.Frame(
             body,
-            bg="#F8FAFD",
+            bg=self.SURFACE,
             highlightbackground=self.BORDER,
             highlightcolor=self.BORDER,
             highlightthickness=1,
@@ -1268,7 +1344,7 @@ class ReplayApp:
         self.tk.Label(
             file_surface,
             text=path.name,
-            bg="#F8FAFD",
+            bg=self.SURFACE,
             fg=self.TEXT,
             anchor=self.tk.W,
             justify=self.tk.LEFT,
@@ -1319,9 +1395,8 @@ class ReplayApp:
     def refresh(self) -> None:
         selected = self.selected_path() if hasattr(self, "tree") else None
         self.tree.delete(*self.tree.get_children())
-        paths = self.store.list()
-        for path in paths:
-            stat = path.stat()
+        entries = self.store.list_entries()
+        for path, stat in entries:
             self.tree.insert(
                 "",
                 self.tk.END,
@@ -1330,7 +1405,7 @@ class ReplayApp:
                 image=self.empty_replay_marker,
                 values=(datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"), f"{stat.st_size / 1024:.1f} KB"),
             )
-        self.library_title.set(self.tr("已保存的回放（{count}）", count=len(paths)))
+        self.library_title.set(self.tr("已保存的回放（{count}）", count=len(entries)))
         if selected and self.tree.exists(str(selected)):
             self.tree.selection_set(str(selected))
         self.schedule_replay_column_resize()
@@ -1345,7 +1420,7 @@ class ReplayApp:
 
     def poll_events(self) -> None:
         try:
-            while True:
+            for _ in range(100):
                 kind, data = self.events.get_nowait()
                 if kind == "attached":
                     details = data if isinstance(data, dict) else {"pid": data, "game_version": None}
@@ -1493,6 +1568,7 @@ class ReplayApp:
         self.root.after(150, self.poll_events)
 
     def close(self) -> None:
+        self.root.after_cancel(self._theme_job)
         self.manager.detach()
         self.root.destroy()
 
@@ -1535,3 +1611,4 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
