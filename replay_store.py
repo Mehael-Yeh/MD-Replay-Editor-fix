@@ -7,6 +7,8 @@ import os
 import stat
 import re
 import threading
+
+from file_metadata import windows_change_time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -96,8 +98,9 @@ class ReplayStore:
         return target
 
     @staticmethod
-    def _signature(info: os.stat_result) -> tuple[int, ...]:
-        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    def _signature(info: os.stat_result, path: Path) -> tuple[int, ...]:
+        change_time = windows_change_time(path) if os.name == "nt" else info.st_ctime_ns
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, change_time)
 
     def _forget(self, path: Path) -> None:
         previous = self._index.pop(path, None)
@@ -127,8 +130,8 @@ class ReplayStore:
             for path, info in entries:
                 if stop is not None and stop.is_set():
                     return
-                signature = self._signature(info)
-                if path in self._index and self._index[path][0] == signature:
+                signature = self._signature(info, path)
+                if signature[-1] != -1 and path in self._index and self._index[path][0] == signature:
                     continue
                 self._forget(path)
                 try:
@@ -137,7 +140,7 @@ class ReplayStore:
                         digest = hashlib.sha256(bytes.fromhex(value)).hexdigest()
                     except ValueError:
                         digest = None  # Remember invalid files until their metadata changes.
-                    if self._signature(path.stat()) == signature:
+                    if self._signature(path.stat(), path) == signature:
                         self._remember(path, signature, digest)
                 except OSError:
                     continue  # Retry transient read failures on the next scan.
@@ -174,6 +177,6 @@ class ReplayStore:
                 temporary.replace(path)
             finally:
                 temporary.unlink(missing_ok=True)
-            self._remember(path, self._signature(path.stat()), digest)
+            self._remember(path, self._signature(path.stat(), path), digest)
             return SavedReplay(path, True)
 

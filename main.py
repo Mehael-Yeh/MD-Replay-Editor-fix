@@ -365,7 +365,7 @@ class ReplayApp:
         self.update_action_states()
         self.append_log(self.tr("{app} {version} 已启动", app=APP_NAME, version=APP_VERSION))
         self.append_log(self.tr("回放目录：{directory}", directory=self.store.directory))
-        root.after(150, self.poll_events)
+        self._events_job = root.after(150, self.poll_events)
         self._theme_job = root.after(2000, self.poll_system_theme)
 
     def configure_theme_styles(self):
@@ -1637,12 +1637,13 @@ class ReplayApp:
                     self.append_log(str(data))
         except queue.Empty:
             pass
-        self.root.after(150, self.poll_events)
+        self._events_job = self.root.after(150, self.poll_events)
 
     def close(self) -> None:
         self._closed = True
         self.scanner.close()
-        for job in (self._scan_poll_job, self._auto_scan_job, self._render_job):
+        for job in (self._scan_poll_job, self._auto_scan_job, self._render_job,
+                    self._events_job, self._column_resize_job):
             if job is not None:
                 self.root.after_cancel(job)
         self.root.after_cancel(self._theme_job)
