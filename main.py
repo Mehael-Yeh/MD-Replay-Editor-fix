@@ -36,6 +36,7 @@ from game_bridge import (
     wait_for_master_duel_process,
 )
 from app_theme import DARK, LIGHT, THEME_LABELS, load_theme, save_theme, resolve_theme
+from replay_scanner import ReplayScanner
 from replay_store import ReplayStore, SavedReplay, validate_replay_hex
 
 
@@ -350,7 +351,16 @@ class ReplayApp:
 
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.bind("<Configure>", self.update_responsive_layout, add="+")
+        self._closed = False
+        self._scan_generation = 0
+        self._scan_busy = False
+        self._scan_selection = None
+        self._render_job = None
+        self._last_rows = None
+        self.scanner = ReplayScanner(self.store)
         self.refresh()
+        self._scan_poll_job = root.after(100, self.poll_scan_results)
+        self._auto_scan_job = root.after(5000, self.auto_scan)
         self.update_responsive_layout()
         self.update_action_states()
         self.append_log(self.tr("{app} {version} 已启动", app=APP_NAME, version=APP_VERSION))
@@ -567,7 +577,7 @@ class ReplayApp:
         size_samples = [self.tr("文件大小"), "0000.0 KB"]
         size_samples.extend(self.tree.set(item, "size") for item in self.tree.get_children())
         time_width = max(155, max(self.replay_list_font.measure(value) for value in time_samples) + 30)
-        size_width = max(90, max(self.replay_list_font.measure(value) for value in size_samples) + 30)
+        size_width = max(90, max(self.replay_list_font.measure(value) for value in set(size_samples)) + 30)
         file_width = max(240, available - time_width - size_width)
         self.tree.column("#0", width=file_width, minwidth=240, anchor=self.tk.W, stretch=True)
         self.tree.column("time", width=time_width, minwidth=155, anchor=self.tk.CENTER, stretch=False)
@@ -984,9 +994,12 @@ class ReplayApp:
 
     def update_replay_markers(self) -> None:
         armed_item = str(self.manager.selected) if self.manager.override_armed and self.manager.selected else None
-        for item in self.tree.get_children():
-            marker = self.armed_replay_marker if item == armed_item else self.empty_replay_marker
-            self.tree.item(item, image=marker)
+        previous = getattr(self, "_armed_item", None)
+        for item in {previous, armed_item} - {None}:
+            if self.tree.exists(item):
+                marker = self.armed_replay_marker if item == armed_item else self.empty_replay_marker
+                self.tree.item(item, image=marker)
+        self._armed_item = armed_item
 
     def update_action_states(self) -> None:
         self.update_replay_markers()
@@ -1202,11 +1215,7 @@ class ReplayApp:
                 new_path = self.store.rename(path, name_var.get())
                 self.manager.replace_selected_path(path, new_path)
                 close_dialog()
-                self.refresh()
-                if self.tree.exists(str(new_path)):
-                    self.tree.selection_set(str(new_path))
-                    self.tree.focus(str(new_path))
-                    self.tree.see(str(new_path))
+                self.refresh(select_path=new_path)
                 self.update_action_states()
                 self.set_status(
                     "重命名成功",
@@ -1392,22 +1401,85 @@ class ReplayApp:
             self.delete_window.destroy()
             self.delete_window = None
 
-    def refresh(self) -> None:
-        selected = self.selected_path() if hasattr(self, "tree") else None
-        self.tree.delete(*self.tree.get_children())
-        entries = self.store.list_entries()
-        for path, stat in entries:
-            self.tree.insert(
-                "",
-                self.tk.END,
-                iid=str(path),
-                text=path.name,
-                image=self.empty_replay_marker,
-                values=(datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"), f"{stat.st_size / 1024:.1f} KB"),
-            )
-        self.library_title.set(self.tr("已保存的回放（{count}）", count=len(entries)))
-        if selected and self.tree.exists(str(selected)):
-            self.tree.selection_set(str(selected))
+    def refresh(self, select_path=None) -> None:
+        if self._render_job is not None:
+            self.root.after_cancel(self._render_job)
+            self._render_job = None
+        if select_path is not None:
+            self._scan_selection = str(select_path)
+        self._scan_busy = True
+        self._scan_generation = self.scanner.request()
+
+    def auto_scan(self):
+        if not self._scan_busy:
+            self.refresh()
+        self._auto_scan_job = self.root.after(5000, self.auto_scan)
+
+    def poll_scan_results(self):
+        try:
+            generation, rows, error = self.scanner.results.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            if generation == self._scan_generation:
+                if error is not None:
+                    self._scan_busy = False
+                    self.append_log(self.tr("错误：{error}", error=error))
+                elif rows == self._last_rows:
+                    self.finish_scan(rows)
+                else:
+                    self.render_scan(generation, rows)
+        self._scan_poll_job = self.root.after(100, self.poll_scan_results)
+
+    def render_scan(self, generation, rows):
+        # Keep unchanged rows, selection and scroll position. Yield between batches.
+        self._last_rows = None
+        wanted = {str(row.path) for row in rows}
+
+        def operations():
+            for item in self.tree.get_children():
+                if item not in wanted:
+                    self.tree.delete(item)
+                yield
+            for index, row in enumerate(rows):
+                item = str(row.path)
+                if self.tree.exists(item):
+                    if tuple(self.tree.item(item, "values")) != row.values:
+                        self.tree.item(item, text=row.path.name, values=row.values)
+                    self.tree.move(item, "", index)
+                else:
+                    self.tree.insert("", index, iid=item, text=row.path.name,
+                                     image=self.empty_replay_marker, values=row.values)
+                yield
+
+        work = operations()
+
+        def batch():
+            self._render_job = None
+            if self._closed or generation != self._scan_generation:
+                return
+            deadline = time.monotonic() + 0.008
+            for _ in range(200):
+                try:
+                    next(work)
+                except StopIteration:
+                    self._last_rows = rows
+                    self.finish_scan(rows)
+                    return
+                if time.monotonic() >= deadline:
+                    break
+            self._render_job = self.root.after(1, batch)
+
+        batch()
+
+    def finish_scan(self, rows):
+        self._scan_busy = False
+        self.library_title.set(self.tr("已保存的回放（{count}）", count=len(rows)))
+        if self._scan_selection and self.tree.exists(self._scan_selection):
+            self.tree.selection_set(self._scan_selection)
+            self.tree.focus(self._scan_selection)
+            self.tree.see(self._scan_selection)
+        self._scan_selection = None
         self.schedule_replay_column_resize()
         self.update_action_states()
 
@@ -1568,6 +1640,11 @@ class ReplayApp:
         self.root.after(150, self.poll_events)
 
     def close(self) -> None:
+        self._closed = True
+        self.scanner.close()
+        for job in (self._scan_poll_job, self._auto_scan_job, self._render_job):
+            if job is not None:
+                self.root.after_cancel(job)
         self.root.after_cancel(self._theme_job)
         self.manager.detach()
         self.root.destroy()

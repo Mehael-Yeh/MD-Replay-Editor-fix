@@ -1,5 +1,6 @@
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -98,10 +99,18 @@ class ThemeGuiTests(unittest.TestCase):
         self.app = ReplayApp(Path(self.directory.name) / 'replays')
         self.addCleanup(self.app.close)
 
+    def wait_for_scan(self):
+        deadline = time.monotonic() + 10
+        while self.app._scan_busy and time.monotonic() < deadline:
+            self.app.root.update()
+            time.sleep(0.005)
+        self.assertFalse(self.app._scan_busy)
+
     def test_live_switch_preserves_selection_and_open_dialogs(self):
         app = self.app
         replay = app.store.save(b'replaym-data'.hex()).path
         app.refresh()
+        self.wait_for_scan()
         app.tree.selection_set(str(replay))
         app.show_log_window()
         app.show_tutorial()
@@ -132,3 +141,36 @@ class ThemeGuiTests(unittest.TestCase):
         with patch('app_theme.system_theme', return_value='dark'):
             app.poll_system_theme()
         self.assertEqual(app.theme, 'light')
+
+    def test_background_refresh_keeps_selection_and_handles_external_changes(self):
+        app = self.app
+        first = app.store.save(b'replaym-first'.hex()).path
+        app.refresh()
+        self.wait_for_scan()
+        app.tree.selection_set(str(first))
+        second = app.store.save(b'replaym-second'.hex()).path
+        app.refresh()
+        self.wait_for_scan()
+        self.assertEqual(app.selected_path(), first)
+        self.assertTrue(app.tree.exists(str(second)))
+        renamed = app.store.rename(first, 'renamed')
+        app.refresh(select_path=renamed)
+        self.wait_for_scan()
+        self.assertEqual(app.selected_path(), renamed)
+        app.store.delete(second)
+        app.refresh()
+        self.wait_for_scan()
+        self.assertFalse(app.tree.exists(str(second)))
+
+    def test_large_refresh_yields_and_latest_request_wins(self):
+        from replay_scanner import ReplayRow
+        app = self.app
+        self.wait_for_scan()
+        rows = [ReplayRow(Path(f'{i}.replay'), ('2026-01-01 00:00:00', '1.0 KB'))
+                for i in range(1000)]
+        app._scan_busy = True
+        app.render_scan(app._scan_generation, rows)
+        self.assertIsNotNone(app._render_job)
+        app.refresh()  # Cancel an unfinished rendering pass.
+        self.wait_for_scan()
+        self.assertEqual(app.tree.get_children(), ())

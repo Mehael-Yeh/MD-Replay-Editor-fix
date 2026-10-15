@@ -40,6 +40,9 @@ class ReplayStore:
         self.tr = translator or (lambda text, **values: text.format(**values))
         self._save_lock = threading.RLock()
         self.directory.mkdir(parents=True, exist_ok=True)
+        # Cache only fingerprints and digests, never replay payloads.
+        self._index: dict[Path, tuple[tuple[int, ...], str | None]] = {}
+        self._digests: dict[str, set[Path]] = {}
 
     def list(self) -> list[Path]:
         return [path for path, _ in self.list_entries()]
@@ -92,38 +95,85 @@ class ReplayStore:
         source.rename(target)
         return target
 
+    @staticmethod
+    def _signature(info: os.stat_result) -> tuple[int, ...]:
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    def _forget(self, path: Path) -> None:
+        previous = self._index.pop(path, None)
+        if previous is not None and previous[1] is not None:
+            bucket = self._digests[previous[1]]
+            bucket.discard(path)
+            if not bucket:
+                del self._digests[previous[1]]
+
+    def _remember(self, path: Path, signature: tuple[int, ...], digest: str | None) -> None:
+        self._forget(path)
+        self._index[path] = (signature, digest)
+        if digest is not None:
+            self._digests.setdefault(digest, set()).add(path)
+
+    def warm_index(self, stop: threading.Event | None = None) -> None:
+        """Reconcile external edits; unchanged files require metadata reads only.
+
+        Also used before saving, so external additions cannot be missed just because
+        a background scan has not run yet. Cold indexing is linear in library size.
+        """
+        with self._save_lock:
+            entries = self.list_entries()
+            present = {path for path, _ in entries}
+            for path in self._index.keys() - present:
+                self._forget(path)
+            for path, info in entries:
+                if stop is not None and stop.is_set():
+                    return
+                signature = self._signature(info)
+                if path in self._index and self._index[path][0] == signature:
+                    continue
+                self._forget(path)
+                try:
+                    try:
+                        value = self.read(path)
+                        digest = hashlib.sha256(bytes.fromhex(value)).hexdigest()
+                    except ValueError:
+                        digest = None  # Remember invalid files until their metadata changes.
+                    if self._signature(path.stat()) == signature:
+                        self._remember(path, signature, digest)
+                except OSError:
+                    continue  # Retry transient read failures on the next scan.
+
     def _find_duplicate(self, replay_hex: str, digest: str) -> Optional[Path]:
-        preferred = list(self.directory.glob(f"*_{digest}.replay"))
-        preferred_set = set(preferred)
-        candidates = preferred + [
-            candidate
-            for candidate in self.directory.glob("*.replay")
-            if candidate not in preferred_set
-        ]
-        for candidate in candidates:
+        self.warm_index()
+        for candidate in sorted(self._digests.get(digest, ())):
             try:
+                # Never trust the digest (or a digest-looking filename) alone.
                 if self.read(candidate) == replay_hex:
                     return candidate
             except (OSError, ValueError):
-                continue
+                pass
+            self._forget(candidate)
         return None
 
     def save(self, replay_hex: str) -> SavedReplay:
         replay_hex = validate_replay_hex(replay_hex, self.tr)
-        digest = hashlib.sha256(bytes.fromhex(replay_hex)).hexdigest()[:12]
+        digest = hashlib.sha256(bytes.fromhex(replay_hex)).hexdigest()
         with self._save_lock:
             existing = self._find_duplicate(replay_hex, digest)
             if existing:
                 return SavedReplay(existing, False)
 
             stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            path = self.directory / f"{stamp}_{digest}.replay"
+            path = self.directory / f"{stamp}_{digest[:12]}.replay"
             suffix = 2
             while path.exists():
-                path = self.directory / f"{stamp}_{suffix}_{digest}.replay"
+                path = self.directory / f"{stamp}_{suffix}_{digest[:12]}.replay"
                 suffix += 1
             temporary = path.with_suffix(".tmp")
-            temporary.write_text(replay_hex, encoding="ascii")
-            temporary.replace(path)
+            try:
+                temporary.write_text(replay_hex, encoding="ascii")
+                temporary.replace(path)
+            finally:
+                temporary.unlink(missing_ok=True)
+            self._remember(path, self._signature(path.stat()), digest)
             return SavedReplay(path, True)
 
