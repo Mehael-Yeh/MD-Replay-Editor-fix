@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+from app_settings import load_settings, save_setting, settings_path
 from pathlib import Path
 
 
@@ -166,6 +166,10 @@ ENGLISH_TRANSLATIONS = {
 
 
 ENGLISH_TRANSLATIONS.update({
+    "主题": "Theme",
+    "跟随系统": "System",
+    "浅色": "Light",
+    "深色": "Dark",
     "点击下面的蓝色按钮，程序会启动 Master Duel 并自动连接。": "Click the blue button below to launch Master Duel and connect automatically.",
     "1. 启动/连接游戏并自动保存": "1. Launch/Connect and Auto-Save",
     "启动并连接游戏": "Launch and Connect to the Game",
@@ -210,19 +214,10 @@ def translate(language: str, text: str, **values: object) -> str:
     return template.format(**values)
 
 
-def settings_path(data_dir: Path) -> Path:
-    return data_dir.parent / "settings.json"
-
-
 def load_language(data_dir: Path) -> str:
-    try:
-        value = json.loads(settings_path(data_dir).read_text(encoding="utf-8")).get("language")
-        return value if value in LANGUAGE_NAMES else DEFAULT_LANGUAGE
-    except (OSError, ValueError, TypeError, AttributeError):
-        return DEFAULT_LANGUAGE
+    value = load_settings(data_dir).get("language")
+    return value if isinstance(value, str) and value in LANGUAGE_NAMES else DEFAULT_LANGUAGE
 
 
 def save_language(data_dir: Path, language: str) -> None:
-    path = settings_path(data_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"language": language}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    save_setting(data_dir, "language", language)

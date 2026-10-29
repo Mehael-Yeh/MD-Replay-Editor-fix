@@ -40,6 +40,7 @@ class ReplayIdentityTests(unittest.TestCase):
             path = Path(tmp) / "自定义旧录像.replay"
             path.write_text(original, encoding="ascii")
             before = path.stat().st_mtime_ns
+            store.warm_index()
             saved = store.save(captured)
             self.assertFalse(saved.created)
             self.assertEqual(saved.path, path)

@@ -248,8 +248,8 @@ class ReplayManagerTests(unittest.TestCase):
             with patch.object(
                 __import__("game_bridge").ctypes,
                 "windll",
-                SimpleNamespace(user32=fake_user32),
-            ):
+                SimpleNamespace(user32=fake_user32), create=True,
+            ), patch("game_bridge.os", SimpleNamespace(name="nt")):
                 with patch("game_bridge.time.sleep"):
                     manager._detach_and_forward_game_close(
                         0x123456,
@@ -284,8 +284,8 @@ class ReplayManagerTests(unittest.TestCase):
             with patch.object(
                 __import__("game_bridge").ctypes,
                 "windll",
-                SimpleNamespace(user32=FakeUser32()),
-            ):
+                SimpleNamespace(user32=FakeUser32()), create=True,
+            ), patch("game_bridge.os", SimpleNamespace(name="nt")):
                 manager._detach_and_forward_game_close(0x123456)
 
             manager.detach.assert_not_called()
@@ -498,3 +498,4 @@ class ReplayManagerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
