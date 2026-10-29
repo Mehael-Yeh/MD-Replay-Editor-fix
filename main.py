@@ -128,6 +128,8 @@ class ReplayApp:
         self.tutorial_window = None
         self.rename_window = None
         self.delete_window = None
+        self.sort_column = "time"
+        self.sort_descending = True
 
         root = tk.Tk()
         self.root = root
@@ -350,9 +352,7 @@ class ReplayApp:
             style="Replay.Vertical.TScrollbar",
         )
         self.tree.configure(yscrollcommand=scrollbar.set)
-        self.tree.heading("#0", text=self.tr("文件名"), anchor=tk.CENTER)
-        self.tree.heading("time", text=self.tr("保存时间"), anchor=tk.CENTER)
-        self.tree.heading("size", text=self.tr("文件大小"), anchor=tk.CENTER)
+        self.update_sort_headings()
         self.tree.column("#0", width=500, minwidth=240, anchor=tk.W, stretch=True)
         self.tree.column("time", width=180, minwidth=155, anchor=tk.CENTER, stretch=False)
         self.tree.column("size", width=105, minwidth=90, anchor=tk.CENTER, stretch=False)
@@ -438,9 +438,7 @@ class ReplayApp:
         self.language_button.configure(text=self.language_button_text())
         self.open_folder_button.configure(text=self.tr("打开保存位置"))
         self.refresh_button.configure(text=self.tr("刷新列表"))
-        self.tree.heading("#0", text=self.tr("文件名"), anchor=self.tk.CENTER)
-        self.tree.heading("time", text=self.tr("保存时间"), anchor=self.tk.CENTER)
-        self.tree.heading("size", text=self.tr("文件大小"), anchor=self.tk.CENTER)
+        self.update_sort_headings()
         self.replay_menu.entryconfigure(0, label=self.tr("下一条播放"))
         self.replay_menu.entryconfigure(1, label=self.tr("直接播放"))
         self.replay_menu.entryconfigure(2, label=self.tr("重命名"))
@@ -1316,10 +1314,29 @@ class ReplayApp:
             self.delete_window.destroy()
             self.delete_window = None
 
+    def update_sort_headings(self) -> None:
+        for column, title in (("name", "文件名"), ("time", "保存时间"), ("size", "文件大小")):
+            arrow = (" ▼" if self.sort_descending else " ▲") if self.sort_column == column else ""
+            self.tree.heading(
+                "#0" if column == "name" else column,
+                text=self.tr(title) + arrow,
+                anchor=self.tk.CENTER,
+                command=lambda column=column: self.sort_replays(column),
+            )
+
+    def sort_replays(self, column: str) -> None:
+        if self.sort_column == column:
+            self.sort_descending = not self.sort_descending
+        else:
+            self.sort_column = column
+            self.sort_descending = column == "time"
+        self.update_sort_headings()
+        self.refresh()
+
     def refresh(self) -> None:
         selected = self.selected_path() if hasattr(self, "tree") else None
         self.tree.delete(*self.tree.get_children())
-        paths = self.store.list()
+        paths = self.store.list(self.sort_column, self.sort_descending)
         for path in paths:
             stat = path.stat()
             self.tree.insert(

@@ -103,6 +103,20 @@ class ReplayStoreTests(unittest.TestCase):
                 store.delete(outside)
             self.assertTrue(outside.exists())
 
+    def test_list_sorts_names_times_and_numeric_sizes_in_both_directions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ReplayStore(Path(tmp))
+            for name, stamp, size in (("b", 100, 100), ("A", 300, 9), ("c", 200, 20)):
+                path = Path(tmp) / f"{name}.replay"
+                path.write_bytes(b"0" * size)
+                os.utime(path, (stamp, stamp))
+            for column, expected in (("name", ["A", "b", "c"]),
+                                     ("time", ["b", "c", "A"]),
+                                     ("size", ["A", "c", "b"])):
+                with self.subTest(column=column):
+                    self.assertEqual([p.stem for p in store.list(column, False)], expected)
+                    self.assertEqual([p.stem for p in store.list(column, True)], expected[::-1])
+
     def test_rename_uses_friendly_name_and_keeps_deduplication(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = ReplayStore(Path(tmp))

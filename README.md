@@ -41,6 +41,8 @@ Play Next recognizes official replay routes only. Live Ranked, Casual, and Event
 - Starts Master Duel through Steam and connects automatically.
 - Plays saved local replays immediately from Home, with a safe Play Next fallback elsewhere.
 - Renames and deletes local replay files.
+- Duplicate recordings reuse the existing file and custom name even when playback request metadata changes; original packet data is preserved.
+- Click the filename, saved time or size column header to toggle sorting. The default is newest first; refreshing keeps the selected order.
 
 ## How It Works
 
